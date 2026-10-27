@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "./lib/api";
 import { Home } from "./screens/Home";
 import { Setup } from "./screens/Setup";
 import { Work } from "./screens/Work";
@@ -21,6 +22,18 @@ export function App() {
   const [vehicleId, setVehicleId] = useState<string | null>(readVehicleId);
   const [screen, setScreen] = useState<Screen>("home");
   const [started, setStarted] = useState(false);
+  const [voiceReady, setVoiceReady] = useState(false);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    api.vehicle(vehicleId).catch((error: unknown) => {
+      if (!active || !(error instanceof Error) || !error.message.endsWith(" 404")) return;
+      try { localStorage.removeItem(VEHICLE_KEY); } catch { /* Continue in memory. */ }
+      setVehicleId(null);
+    });
+    return () => { active = false; };
+  }, [vehicleId]);
 
   if (!vehicleId) {
     return (
@@ -39,8 +52,10 @@ export function App() {
 
   // 처음 한 번의 터치로 TTS·마이크·화면 유지를 켠다. 이후에는 음성과 동작으로 진행한다.
   const start = async () => {
+    if (started) return;
     voice.unlockTts();
     await voice.startListening();
+    setVoiceReady(true);
     try {
       await navigator.wakeLock?.request("screen");
     } catch {
@@ -49,9 +64,20 @@ export function App() {
     setStarted(true);
   };
 
+  const startTask = async () => {
+    try {
+      await start();
+    } catch (error) {
+      // 마이크가 막혀도 카메라 관찰 안내는 진행할 수 있다.
+      console.warn("Voice input unavailable", error);
+      setVoiceReady(false);
+    }
+    setScreen("work");
+  };
+
   return screen === "home" ? (
-    <Home vehicleId={vehicleId} started={started} onStart={start} onStartTask={() => setScreen("work")} />
+    <Home vehicleId={vehicleId} started={started} onStart={start} onStartTask={startTask} />
   ) : (
-    <Work vehicleId={vehicleId} onDone={() => setScreen("home")} />
+    <Work vehicleId={vehicleId} voiceReady={voiceReady} onDone={() => setScreen("home")} />
   );
 }

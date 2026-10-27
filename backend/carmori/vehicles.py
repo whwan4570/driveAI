@@ -1,4 +1,4 @@
-"""지원 차량 사양. MVP는 차량 1종만 지원한다."""
+"""Generic washer guidance; no manufacturer service interval is claimed."""
 
 from __future__ import annotations
 
@@ -18,13 +18,12 @@ class VehicleSpec:
     forbidden_label_terms: tuple[str, ...]
 
 
-# TODO(Day 1): 실제 시연 차량·연식·매뉴얼 항목으로 교체한다.
 DEMO_SPEC = VehicleSpec(
     spec_id="demo",
-    display_name="시연 차량 (Day 1 확정)",
-    years=(2015, 2026),
-    inlet_description="엔진룸 안 와이퍼·물줄기 기호가 있는 파란 캡",
-    manual_ref="TBD: 차량 매뉴얼의 워셔액 항목 페이지",
+    display_name="Generic vehicle guide",
+    years=(1981, 2035),
+    inlet_description="Blue cap with a windshield washer symbol in the engine bay",
+    manual_ref="Vehicle-specific manual unavailable; confirm the reservoir in your owner's manual",
     washer_label_terms=("워셔액", "washer", "windshield", "윈도우액"),
     forbidden_label_terms=("냉각수", "coolant", "엔진오일", "engineoil", "브레이크", "brake"),
 )

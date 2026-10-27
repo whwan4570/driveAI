@@ -1,13 +1,67 @@
-"""Open-Meteo 현재 날씨. 실패하면 None을 돌려주고 브리핑에서 빼기만 한다."""
+"""Open-Meteo weather context. Failed lookups stay explicitly unavailable."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Literal, Protocol
 
 import httpx
 from pydantic import BaseModel
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
+
+class EnvironmentContext(BaseModel):
+    status: Literal["available", "unavailable"] = "unavailable"
+    provider: str = "Open-Meteo"
+    area: str | None = None
+    time_window: str | None = None
+    last_successful_update: datetime | None = None
+    rainfall_mm: float | None = None
+
+
+class EnvironmentProvider(Protocol):
+    async def get(self, region: str | None) -> EnvironmentContext: ...
+
+
+class OpenMeteoEnvironment:
+    def __init__(self) -> None:
+        self._cache: dict[str, tuple[datetime, EnvironmentContext]] = {}
+
+    async def get(self, region: str | None) -> EnvironmentContext:
+        if not region:
+            return EnvironmentContext(area=None)
+        now = datetime.now(timezone.utc)
+        cached = self._cache.get(region)
+        if cached and (now - cached[0]).total_seconds() < 900:
+            return cached[1]
+        unavailable = EnvironmentContext(area=region)
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                place_response = await client.get(GEOCODING_URL, params={"name": region, "count": 1})
+                place_response.raise_for_status()
+                places = place_response.json().get("results") or []
+                if not places:
+                    return unavailable
+                place = places[0]
+                weather_response = await client.get(OPEN_METEO_URL, params={
+                    "latitude": place["latitude"], "longitude": place["longitude"],
+                    "daily": "rain_sum", "past_days": 7, "forecast_days": 1, "timezone": "auto",
+                })
+                weather_response.raise_for_status()
+                daily = weather_response.json()["daily"]
+            days, rain = daily["time"][:-1], daily["rain_sum"][:-1]
+            if not days or len(days) != len(rain) or any(value is None for value in rain):
+                return unavailable
+            area = ", ".join(str(item) for item in (place.get("name"), place.get("admin1"), place.get("country_code")) if item)
+            result = EnvironmentContext(status="available", area=area,
+                                        time_window=f"{days[0]} to {days[-1]}",
+                                        last_successful_update=now, rainfall_mm=round(sum(rain), 1))
+            self._cache[region] = (now, result)
+            return result
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError):
+            return unavailable
 
 
 class WeatherNow(BaseModel):

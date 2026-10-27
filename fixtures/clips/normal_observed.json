@@ -1,10 +1,10 @@
 {
   "name": "normal_observed",
-  "description": "정상 경로: 열기·제품·붓기(흐름 보임)·닫기를 모두 관찰해 자동 기록",
+  "description": "정상 경로: 단계는 자동 진행, 완료 기록은 사용자 확인 후 저장",
   "source": "synthetic",
   "expect": {
     "final_step": "RECORDED",
-    "completion_source": "observed_sequence",
+    "completion_source": "user_voice_confirmed",
     "waiting_reason": null
   },
   "events": [
@@ -17,6 +17,7 @@
     {"t": 14.0, "seq": 7, "frames": ["f013", "f014"], "answer": {"bottle_over_inlet": "yes", "bottle_tilted": "yes", "flow_visible": "yes"}},
     {"t": 15.0, "seq": 8, "frames": ["f015", "f016"], "answer": {"bottle_over_inlet": "yes", "bottle_tilted": "yes", "flow_visible": "yes"}},
     {"t": 23.0, "seq": 9, "frames": ["f017", "f018"], "answer": {"cap_state": "closed", "bottle_upright": "yes"}},
-    {"t": 24.0, "seq": 10, "frames": ["f019", "f020"], "answer": {"cap_state": "closed", "bottle_upright": "yes"}}
+    {"t": 24.0, "seq": 10, "frames": ["f019", "f020"], "answer": {"cap_state": "closed", "bottle_upright": "yes"}},
+    {"t": 26.0, "voice": "CONFIRM_YES"}
   ]
 }

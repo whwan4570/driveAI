@@ -81,7 +81,7 @@ def test_two_disjoint_windows_advance_and_speak_next_hint():
     d.obs(INLET)
     r = d.obs(INLET)
     assert d.state.step is Step.OPEN_CAP
-    assert r.spoken_hint == "표시한 캡을 열어주세요."
+    assert r.spoken_hint == "Open the cap I marked."
 
 
 def test_overlapping_frames_are_not_independent_confirmation():
@@ -106,7 +106,7 @@ def test_occlusion_breaks_the_consecutive_run():
     d.obs(OPEN)
     r = d.obs(SceneAnswer(occluded=True, cap_state=CapState.OCCLUDED))
     assert d.state.waiting_reason is WaitReason.OCCLUDED
-    assert r.spoken_hint == "캡이 보이지 않아요. 손을 잠깐 옮겨주세요."
+    assert r.spoken_hint == "I cannot see the cap. Move your hand aside for a moment."
     d.obs(OPEN)
     assert d.state.step is Step.OPEN_CAP
 
@@ -129,7 +129,7 @@ def test_same_hint_is_not_repeated_but_repeat_intent_forces_it():
     d = at_open_cap()
     closed = SceneAnswer(cap_state=CapState.CLOSED)
     assert d.obs(closed).spoken_hint is None  # 진입 때 이미 읽었다
-    assert d.voice(VoiceIntent.REPEAT).spoken_hint == "표시한 캡을 열어주세요."
+    assert d.voice(VoiceIntent.REPEAT).spoken_hint == "Open the cap I marked."
 
 
 @pytest.mark.parametrize(
@@ -177,16 +177,20 @@ POUR_FLOW = SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_v
 DONE = SceneAnswer(cap_state=CapState.CLOSED, bottle_upright=Tri.YES)
 
 
-def test_full_observed_sequence_records_once_with_deterministic_id():
+def test_full_observed_sequence_waits_for_user_confirmation_then_records_once():
     d = at_pour()
     d.obs(POUR_FLOW)
     d.obs(POUR_FLOW)
     assert d.state.step is Step.FINISH
     d.obs(DONE)
     r = d.obs(DONE)
+    assert d.state.step is Step.FINISH
+    assert d.state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
+    assert r.completion is None
+    r = d.voice(VoiceIntent.CONFIRM_YES)
     assert d.state.step is Step.RECORDED
     assert r.completion is not None
-    assert r.completion.completion_source is CompletionSource.OBSERVED_SEQUENCE
+    assert r.completion.completion_source is CompletionSource.USER_VOICE_CONFIRMED
     assert r.completion.completion_event_id == completion_event_id("s1", 1)
     assert r.completion.flow_observed
     assert len(r.completion.evidence_frames) == 20  # 전환 5번 × 확인 묶음 2개 × 프레임 2장
@@ -202,7 +206,7 @@ def test_tilt_without_visible_flow_needs_voice_confirmation():
     r = d.obs(DONE)
     assert d.state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
     assert r.completion is None
-    assert r.spoken_hint == "보충하는 모습이 잘 보이지 않았어요. 보충을 마쳤나요?"
+    assert r.spoken_hint == "The pour was out of view. Did you finish refilling?"
     r = d.voice(VoiceIntent.CONFIRM_YES)
     assert r.completion is not None
     assert r.completion.completion_source is CompletionSource.USER_VOICE_CONFIRMED

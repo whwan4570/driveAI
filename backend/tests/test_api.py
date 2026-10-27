@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from carmori.config import Settings
 from carmori.main import create_app
 from carmori.spark import HappyPathSpark
+from carmori.vehicle_recognition import VehicleScanResult, clean_vin
 
 JPEG = base64.b64encode(b"\xff\xd8fake\xff\xd9").decode()
 
@@ -38,8 +39,8 @@ def test_happy_path_records_once_and_updates_memory():
     vid = vehicle["vehicle_id"]
 
     briefing = client.post("/briefings", json={"vehicle_id": vid}).json()
-    assert "보충 기록이 없어요" in briefing["text"]
-    assert "남은 워셔액 양은 확인한 적이 없어요" in briefing["text"]
+    assert "There is no washer fluid refill on record" in briefing["text"]
+    assert "I have not checked the actual washer fluid level" in briefing["text"]
 
     started = client.post("/sessions", json={"vehicle_id": vid}).json()
     sid = started["session"]["session_id"]
@@ -51,8 +52,12 @@ def test_happy_path_records_once_and_updates_memory():
         seq += 2
         steps.append(body["session"]["step"])
         record = body["record"] or record
-    assert steps == ["OPEN_CAP", "CONFIRM_PRODUCT", "POUR", "FINISH", "RECORDED"]
-    assert record["completion_source"] == "observed_sequence"
+    assert steps == ["OPEN_CAP", "CONFIRM_PRODUCT", "POUR", "FINISH", "FINISH"]
+    assert record is None
+    assert client.get(f"/vehicles/{vid}/memory").json() == []
+    confirmed = client.post(f"/sessions/{sid}/voice", json={"intent": "CONFIRM_YES"}).json()
+    assert confirmed["session"]["step"] == "RECORDED"
+    assert confirmed["record"]["completion_source"] == "user_voice_confirmed"
 
     again = client.post(f"/sessions/{sid}/observations", json=windows(seq)).json()
     assert again["windows"][0]["reason"] == "already_recorded"
@@ -60,14 +65,14 @@ def test_happy_path_records_once_and_updates_memory():
     memory = client.get(f"/vehicles/{vid}/memory").json()
     assert len(memory) == 1
 
-    answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "아까 뭐 했지?"}).json()
-    assert "워셔액 보충을 기록했어요" in answer["text"]
+    answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "What did I do earlier?"}).json()
+    assert "A washer fluid refill was logged" in answer["text"]
     assert answer["fact_ids"] == [memory[0]["record_id"]]
 
 
 def test_unsupported_vehicle_is_rejected():
     client = make_client()
-    assert client.post("/vehicles", json={"spec_id": "demo", "year": 1990}).status_code == 422
+    assert client.post("/vehicles", json={"spec_id": "demo", "year": 1970}).status_code == 422
     assert client.post("/vehicles", json={"spec_id": "nope", "year": 2021}).status_code == 422
 
 
@@ -79,3 +84,80 @@ def test_voice_restart_resets_session():
     body = client.post(f"/sessions/{sid}/voice", json={"intent": "RESTART"}).json()
     assert body["session"]["step"] == "FIND_INLET"
     assert body["session"]["attempt"] == 2
+
+
+def test_assistant_recounts_latest_confirmed_tire_action():
+    client = make_client()
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    saved = client.post("/maintenance-records", json={
+        "vehicle_id": vid, "component": "tires", "event_type": "inspection",
+        "user_confirmed": True, "notes": "Pressure measured with a gauge",
+    }).json()
+    answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "What did I do earlier?"}).json()
+    assert "tire inspection" in answer["text"]
+    assert "Pressure measured with a gauge" in answer["text"]
+    assert answer["fact_ids"] == [saved["record_id"]]
+
+
+def test_vehicle_scan_requires_real_model_and_rejects_bad_images():
+    client = make_client()
+    image = base64.b64encode(b"\xff\xd8" + b"x" * 150 + b"\xff\xd9").decode()
+    assert client.get("/vehicles/recognition-status").json() == {"available": False}
+    result = client.post("/vehicles/recognize", json={"mode": "vin", "jpeg_base64": image})
+    assert result.status_code == 200
+    assert result.json()["status"] == "unavailable"
+    assert client.post("/vehicles/recognize", json={"mode": "vin", "jpeg_base64": "bad" * 40}).status_code == 422
+
+
+def test_scanned_vehicle_is_confirmed_and_used_in_briefing():
+    class Recognizer:
+        async def recognize(self, jpeg: bytes, mode: str) -> VehicleScanResult:
+            assert jpeg.startswith(b"\xff\xd8")
+            assert mode == "vin"
+            return VehicleScanResult(
+                status="recognized", source="vin", make="Honda", model="Civic",
+                year=2021, vin_last4="1234", message="VIN decoded.",
+            )
+
+    client = TestClient(create_app(Settings(), spark=HappyPathSpark(), recognizer=Recognizer()))
+    image = base64.b64encode(b"\xff\xd8" + b"x" * 150 + b"\xff\xd9").decode()
+    result = client.post("/vehicles/recognize", json={"mode": "vin", "jpeg_base64": image}).json()
+    assert result["make"] == "Honda" and result["vin_last4"] == "1234"
+    assert "vin" not in result
+    vehicle = client.post("/vehicles", json={"spec_id": "demo", "year": result["year"], "make": result["make"], "model": result["model"]}).json()
+    assert client.get(f"/vehicles/{vehicle['vehicle_id']}").json()["model"] == "Civic"
+    facts = client.post("/briefings", json={"vehicle_id": vehicle["vehicle_id"]}).json()["facts"]
+    assert any(f["text"] == "2021 Honda Civic" for f in facts)
+
+
+def test_vin_requires_all_seventeen_unambiguous_characters():
+    assert clean_vin("1HGCM82633A004352") == "1HGCM82633A004352"
+    assert clean_vin("1HGCM82633A00435O") is None
+    assert clean_vin("1HGCM82633A00435") is None
+
+
+def test_purchase_document_scan_can_prefill_vehicle_without_creating_refill_history():
+    class Recognizer:
+        async def recognize_document(self, data: bytes, mime: str, document_type: str) -> VehicleScanResult:
+            assert data.startswith(b"%PDF-")
+            assert mime == "application/pdf"
+            assert document_type == "window_sticker"
+            return VehicleScanResult(
+                status="recognized", source="document", document_type="window_sticker",
+                make="Toyota", model="Corolla", year=2022,
+                message="Vehicle details were read from the document.",
+            )
+
+    client = TestClient(create_app(Settings(), spark=HappyPathSpark(), recognizer=Recognizer()))
+    file_data = base64.b64encode(b"%PDF-1.7\n" + b"x" * 150).decode()
+    scanned = client.post("/vehicles/recognize-document", json={
+        "document_type": "window_sticker", "mime_type": "application/pdf", "data_base64": file_data,
+    })
+    assert scanned.status_code == 200
+    result = scanned.json()
+    assert (result["make"], result["model"], result["year"]) == ("Toyota", "Corolla", 2022)
+    assert client.post("/vehicles/recognize-document", json={
+        "document_type": "window_sticker", "mime_type": "application/pdf", "data_base64": base64.b64encode(b"not a pdf" * 20).decode(),
+    }).status_code == 422
+    vehicle = client.post("/vehicles", json={"spec_id": "demo", "year": 2022, "make": "Toyota", "model": "Corolla"}).json()
+    assert client.get(f"/vehicles/{vehicle['vehicle_id']}/memory").json() == []

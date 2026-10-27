@@ -1,5 +1,4 @@
-// 인식된 문장을 세션 명령으로 바꾼다. 작업 중 명령은 빨라야 하므로 키워드 규칙을 먼저 쓰고,
-// 어디에도 걸리지 않으면 질문으로 넘긴다.
+// Route short spoken commands before sending open questions to the assistant.
 
 import type { VoiceIntent } from "./api";
 
@@ -9,18 +8,18 @@ export type ParsedUtterance =
   | { kind: "question"; text: string }
   | { kind: "empty" };
 
-// 순서가 중요하다: "다시 시작"은 "다시"보다, "안 했어"는 "했어"보다 먼저 본다.
+// Order matters: restart before repeat, and negative confirmations before yes.
 const RULES: [RegExp, VoiceIntent][] = [
-  [/다시\s*시작|처음부터/, "RESTART"],
-  [/다시\s*(설명|말해)|뭐라고|한\s*번\s*더/, "REPEAT"],
-  [/기록\s*(수정|고쳐)/, "EDIT_RECORD"],
-  [/잠깐|멈춰|스톱|정지/, "PAUSE"],
-  [/계속/, "RESUME"],
-  [/아니|안\s*했|아직/, "CONFIRM_NO"],
-  [/^(네|예|응|맞아|했어|마쳤어|다\s*했어|보충했어)/, "CONFIRM_YES"],
+  [/\b(restart|start over|from the beginning)\b/i, "RESTART"],
+  [/\b(repeat|say that again|tell me again|what did you say|one more time)\b/i, "REPEAT"],
+  [/\b(edit|correct|change) (the |my )?(record|entry)\b/i, "EDIT_RECORD"],
+  [/\b(pause|hold on|wait a second|stop for a moment)\b/i, "PAUSE"],
+  [/\b(resume|continue|go on|keep going)\b/i, "RESUME"],
+  [/^(no|nope|not yet|i (have not|haven't|did not|didn't)|i'm not done)\b/i, "CONFIRM_NO"],
+  [/^(yes|yeah|yep|i (did|have|finished|completed|refilled)|done|finished|completed)\b/i, "CONFIRM_YES"],
 ];
 
-const START_TASK = /어디에?\s*넣|보충\s*(할래|하자|시작)|넣는\s*법/;
+const START_TASK = /\b(where (do|should) i (put|pour|add) (the )?washer fluid|how do i (add|refill) washer fluid|start (the )?(washer fluid )?(refill|check|guide)|help me refill|let's refill)\b/i;
 
 export function parseUtterance(raw: string): ParsedUtterance {
   const text = raw.trim();

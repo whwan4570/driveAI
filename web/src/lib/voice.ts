@@ -41,7 +41,7 @@ export class VoiceIO {
     await this.vad?.pause();
   }
 
-  speak(text: string, lang = "ko-KR"): Promise<void> {
+  speak(text: string, lang = "en-US"): Promise<void> {
     return new Promise((resolve) => {
       speechSynthesis.cancel();
       this.speaking = true;

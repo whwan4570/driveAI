@@ -287,7 +287,8 @@ def _advance(
         )
         return _result(state, "pour_not_observed", "confirm_pour")
     if step is Step.FINISH:
-        return _complete(state, CompletionSource.OBSERVED_SEQUENCE, now)
+        state = state.model_copy(update={"waiting_reason": WaitReason.NEED_VOICE_CONFIRM})
+        return _result(state, "awaiting_completion_confirmation", "confirm_completion")
 
     raise ValueError(f"cannot advance from {step} with {key}")
 

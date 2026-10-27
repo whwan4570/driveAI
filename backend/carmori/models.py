@@ -139,7 +139,21 @@ class VehicleProfile(BaseModel):
     vehicle_id: str
     spec_id: str
     year: int
+    make: str | None = None
+    model: str | None = None
+    trim: str | None = None
     odometer_km: int | None = None
+    odometer_updated_at: datetime | None = None
+    region: str | None = None
+    weekly_miles: float | None = None
+    highway_percent: int | None = None
+    driving_updated_at: datetime | None = None
+    nickname: str | None = None
+    exterior_color: str | None = None
+    generated_image_data_url: str | None = None
+    image_status: str = "needs_color"
+    image_error: str | None = None
+    profile_source: str = "manual"
     created_at: datetime
 
 
@@ -147,6 +161,8 @@ class MaintenanceRecord(BaseModel):
     record_id: str
     vehicle_id: str
     task: str = "washer_fluid_refill"
+    component: str = "washer_fluid"
+    event_type: str = "refill"
     completed_at: datetime
     completion_source: CompletionSource
     completion_event_id: str | None = None
@@ -156,4 +172,10 @@ class MaintenanceRecord(BaseModel):
     flow_observed: bool = False
     model_version: str | None = None
     notes: str | None = None
+    odometer_km: int | None = None
+    user_confirmed: bool = False
+    photo_data_url: str | None = None
+    cost_usd: float | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     revision: int = 1

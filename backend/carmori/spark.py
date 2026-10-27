@@ -1,18 +1,13 @@
-"""Muse Spark 호출 경계.
-
-- analyze: 프레임 묶음 → SceneAnswer (Spark 1.3, 이미지 이해)
-- transcribe: WAV → 텍스트 (Spark 1.2 오디오 경로)
-- answer: 질문 + 사실 목록 → 답변과 근거 사실 id (Spark 1.3)
-
-MetaSparkClient는 Day 1에 행사 계정에서 엔드포인트·모델 ID를 확인한 뒤 채운다.
-그 전까지는 HappyPathSpark로 웹·서버 통합을 진행한다.
-"""
+"""Meta model calls for visual observations and grounded answers."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+import base64
+import json
 from typing import Protocol
 
+import httpx
 from pydantic import BaseModel
 
 from .briefing import Fact
@@ -39,7 +34,7 @@ class SparkClient(Protocol):
 
 
 class MetaSparkClient:
-    """TODO(Day 1): https://dev.meta.ai/docs 기준으로 요청 형식을 구현한다."""
+    """Server-side Muse Spark client. Model output never directly changes state."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -54,13 +49,63 @@ class MetaSparkClient:
         return parse_scene_answer(raw, fields_for(step))
 
     async def transcribe(self, wav: bytes) -> str:
-        raise NotImplementedError("Day 1: Spark 1.2 오디오 요청 형식을 확인한 뒤 구현")
+        if not self.settings.meta_api_key:
+            raise RuntimeError("Meta API key missing")
+        base = self.settings.meta_api_base_url.rstrip("/") or "https://api.meta.ai/v1"
+        request = {"mode": "PUSH_TO_TALK", "model": "muse-voice-transcribe-1.0", "audioEncoding": "WAV"}
+        async with httpx.AsyncClient(timeout=max(30.0, self.settings.spark_timeout_s)) as client:
+            response = await client.post(
+                f"{base}/asr/transcribe",
+                headers={"Authorization": f"Bearer {self.settings.meta_api_key}"},
+                files={"request": (None, json.dumps(request), "application/json"), "audio": ("speech.wav", wav, "audio/wav")},
+            )
+            response.raise_for_status()
+        transcript = response.json().get("transcript")
+        return transcript.strip() if isinstance(transcript, str) else ""
 
     async def answer(self, question: str, facts: Sequence[Fact]) -> AssistantAnswer:
-        raise NotImplementedError("Day 1: Spark 1.3 텍스트 답변 요청을 구현")
+        payload = [{"id": fact.id, "text": fact.text, "source": fact.source} for fact in facts]
+        prompt = (
+            "Answer the user's vehicle question using ONLY the supplied facts. "
+            "Say when a measurement or vehicle-specific guidance is unknown. "
+            "Return only JSON with keys text (short string) and fact_ids (array of used fact ids). "
+            "Never invent service intervals, fluid levels, tire condition, or repair safety.\n"
+            f"Facts: {json.dumps(payload)}\nQuestion: {question}"
+        )
+        raw = await self._request([{"type": "text", "text": prompt}])
+        try:
+            parsed = json.loads(_strip_json(raw))
+            return AssistantAnswer.model_validate(parsed)
+        except (ValueError, TypeError):
+            return AssistantAnswer(text="I cannot answer that from your saved records.", fact_ids=[])
 
     async def _vision_request(self, prompt: str, images: Sequence[bytes]) -> str:
-        raise NotImplementedError("Day 1: Spark 1.3 이미지 요청 형식을 확인한 뒤 구현")
+        content = [{"type": "text", "text": prompt}]
+        content.extend({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(img).decode('ascii')}"}} for img in images)
+        return await self._request(content)
+
+    async def _request(self, content: list[dict]) -> str:
+        if not self.settings.meta_api_key:
+            raise RuntimeError("Meta API key missing")
+        base = self.settings.meta_api_base_url.rstrip("/") or "https://api.meta.ai/v1"
+        async with httpx.AsyncClient(timeout=self.settings.spark_timeout_s) as client:
+            response = await client.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {self.settings.meta_api_key}"},
+                json={"model": self.settings.spark_vision_model, "messages": [{"role": "user", "content": content}]},
+            )
+            response.raise_for_status()
+        message = response.json()["choices"][0]["message"]["content"]
+        if not isinstance(message, str):
+            raise ValueError("Meta returned non-text content")
+        return message
+
+
+def _strip_json(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    return text
 
 
 class HappyPathSpark:
@@ -74,7 +119,7 @@ class HappyPathSpark:
     _ANSWERS: dict[Step, SceneAnswer] = {
         Step.FIND_INLET: SceneAnswer(inlet_visible=Tri.YES, inlet_symbol_ok=Tri.YES, cap_state=CapState.CLOSED),
         Step.OPEN_CAP: SceneAnswer(cap_state=CapState.OPEN, hand_near_cap=Tri.YES),
-        Step.CONFIRM_PRODUCT: SceneAnswer(label_text="사계절 워셔액", product_class=ProductClass.WASHER_FLUID),
+        Step.CONFIRM_PRODUCT: SceneAnswer(label_text="All-season washer fluid", product_class=ProductClass.WASHER_FLUID),
         Step.POUR: SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_visible=Tri.YES),
         Step.FINISH: SceneAnswer(cap_state=CapState.CLOSED, bottle_upright=Tri.YES),
     }
@@ -90,7 +135,7 @@ class HappyPathSpark:
     async def answer(self, question: str, facts: Sequence[Fact]) -> AssistantAnswer:
         used = [f for f in facts if f.id != "vehicle"]
         return AssistantAnswer(
-            text="저장된 기록 기준으로 말씀드리면, " + " ".join(f.text for f in used),
+            text="Based on your saved records, " + " ".join(f.text for f in used),
             fact_ids=[f.id for f in used],
         )
 
