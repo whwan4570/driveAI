@@ -22,7 +22,7 @@ Component = Literal["washer_fluid", "tires"]
 class Evidence(BaseModel):
     label: str
     value: str
-    source: Literal["vehicle_profile", "maintenance_record", "user_driving_profile", "external_weather"]
+    source: Literal["vehicle_profile", "maintenance_record", "user_driving_profile", "phone_gps", "external_weather"]
     record_id: str | None = None
 
 
@@ -55,10 +55,12 @@ def calculate_recommendations(
         value=f"{vehicle.odometer_km / 1.609344:,.0f} mi" if vehicle.odometer_km is not None else "Not provided",
         source="vehicle_profile",
     )
+    gps = vehicle.driving_source == "gps"
     weekly = Evidence(
-        label="Typical weekly driving",
-        value=f"{vehicle.weekly_miles:,.0f} mi/week" if vehicle.weekly_miles is not None else "Not provided",
-        source="user_driving_profile",
+        label="GPS-tracked driving, past 7 days" if gps else "Typical weekly driving",
+        value=f"{vehicle.weekly_miles:,.0f} mi" if gps and vehicle.weekly_miles is not None
+        else f"{vehicle.weekly_miles:,.0f} mi/week" if vehicle.weekly_miles is not None else "Not tracked yet",
+        source="phone_gps" if gps else "user_driving_profile",
     )
 
     washer = _latest(records, "washer_fluid")
@@ -107,7 +109,8 @@ def calculate_recommendations(
     elif vehicle.weekly_miles >= 200:
         tire_priority = "CHECK_SOON"
         tire_title = "Inspect your tires soon"
-        tire_explanation = "Your declared weekly distance is 200 miles or more and no confirmed tire inspection is recorded. This is a contextual check, not a replacement prediction."
+        distance = "Phone GPS tracked 200 miles or more in the past 7 days" if gps else "Your declared weekly distance is 200 miles or more"
+        tire_explanation = f"{distance} and no confirmed tire inspection is recorded. This is a contextual check, not a replacement prediction."
     else:
         tire_priority = "INFORMATION_NEEDED"
         tire_title = "Record a tire inspection"

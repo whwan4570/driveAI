@@ -19,7 +19,7 @@ from carmori.vehicles import DEMO_SPEC
 
 
 class NoWeather:
-    async def get(self, region: str | None) -> EnvironmentContext:
+    async def get(self, region: str | None, coords: tuple[float, float] | None = None) -> EnvironmentContext:
         return EnvironmentContext(area=region)
 
 

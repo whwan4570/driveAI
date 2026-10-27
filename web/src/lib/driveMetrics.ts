@@ -11,7 +11,19 @@ export type DriveSummary = {
   typicalMeters: number | null;
   speedMps: number | null;
   trackedDays: number;
+  // Rolling 7 days including today. Only distance driven while tracking was on.
+  weekMeters: number | null;
+  weekHighwayMeters: number;
+  weekTrackedDays: number;
 };
+
+// About 45 mph. Segments at or above this speed count toward the highway share.
+const HIGHWAY_MPS = 20;
+
+function readDays(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(Object.entries(value as Record<string, number>).filter(([day, meters]) => /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(meters) && meters >= 0));
+}
 
 function localDay(timestamp: number): string {
   const day = new Date(timestamp);
@@ -32,6 +44,7 @@ function distanceMeters(a: DriveFix, b: DriveFix): number {
 export class DriveMetrics {
   private readonly key: string;
   private readonly days: Record<string, number>;
+  private readonly highway: Record<string, number>;
   private previous: DriveFix | null = null;
   private speedMps: number | null = null;
   private speedAt: number | null = null;
@@ -39,13 +52,14 @@ export class DriveMetrics {
   constructor(vehicleId: string) {
     this.key = `carmori.driveMetrics.${vehicleId}`;
     let days: Record<string, number> = {};
+    let highway: Record<string, number> = {};
     try {
-      const stored = JSON.parse(localStorage.getItem(this.key) ?? "null") as { days?: Record<string, number> } | null;
-      if (stored?.days && typeof stored.days === "object") {
-        days = Object.fromEntries(Object.entries(stored.days).filter(([day, meters]) => /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(meters) && meters >= 0));
-      }
+      const stored = JSON.parse(localStorage.getItem(this.key) ?? "null") as { days?: unknown; highway?: unknown } | null;
+      days = readDays(stored?.days);
+      highway = readDays(stored?.highway);
     } catch { /* Continue without saved driving data. */ }
     this.days = days;
+    this.highway = highway;
   }
 
   observe(fix: DriveFix): DriveSummary {
@@ -76,7 +90,8 @@ export class DriveMetrics {
     if (moving) {
       const day = localDay(fix.timestamp);
       this.days[day] = (this.days[day] ?? 0) + meters;
-      try { localStorage.setItem(this.key, JSON.stringify({ days: this.days })); } catch { /* Keep this session's estimate. */ }
+      if ((gpsSpeed ?? derivedSpeed) >= HIGHWAY_MPS) this.highway[day] = (this.highway[day] ?? 0) + meters;
+      try { localStorage.setItem(this.key, JSON.stringify({ days: this.days, highway: this.highway })); } catch { /* Keep this session's estimate. */ }
     }
     return this.summary(fix.timestamp);
   }
@@ -87,11 +102,18 @@ export class DriveMetrics {
     cutoff.setDate(cutoff.getDate() - 30);
     const cutoffDay = localDay(cutoff.getTime());
     const prior = Object.entries(this.days).filter(([day, meters]) => day >= cutoffDay && day < today && meters > 0).map(([, meters]) => meters);
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - 6);
+    const weekStartDay = localDay(weekStart.getTime());
+    const week = Object.entries(this.days).filter(([day, meters]) => day >= weekStartDay && day <= today && meters > 0);
     return {
       todayMeters: this.days[today] ?? null,
       typicalMeters: prior.length ? prior.reduce((sum, meters) => sum + meters, 0) / prior.length : null,
       speedMps: this.speedAt !== null && Math.abs(now - this.speedAt) <= 20_000 ? this.speedMps : null,
       trackedDays: prior.length,
+      weekMeters: week.length ? week.reduce((sum, [, meters]) => sum + meters, 0) : null,
+      weekHighwayMeters: week.reduce((sum, [day]) => sum + (this.highway[day] ?? 0), 0),
+      weekTrackedDays: week.length,
     };
   }
 

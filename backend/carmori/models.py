@@ -148,6 +148,12 @@ class VehicleProfile(BaseModel):
     weekly_miles: float | None = None
     highway_percent: int | None = None
     driving_updated_at: datetime | None = None
+    # gps: weekly_miles is phone-GPS distance over the past 7 days. manual: typed by the user.
+    driving_source: str | None = None
+    # Last GPS location, rounded to about 1 km. Used only for local weather.
+    location_lat: float | None = None
+    location_lon: float | None = None
+    location_updated_at: datetime | None = None
     nickname: str | None = None
     exterior_color: str | None = None
     generated_image_data_url: str | None = None

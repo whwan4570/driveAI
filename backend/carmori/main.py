@@ -133,6 +133,14 @@ class VehiclePatchIn(BaseModel):
     exterior_color: str | None = Field(default=None, max_length=40)
 
 
+class DrivingSummaryIn(BaseModel):
+    # Sent by the phone while GPS tracking runs. Distance is the past 7 days, not a forecast.
+    weekly_miles: float | None = Field(default=None, ge=0, le=3000)
+    highway_percent: int | None = Field(default=None, ge=0, le=100)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+
 class VehicleScanIn(BaseModel):
     mode: ScanMode
     jpeg_base64: str = Field(min_length=100, max_length=5_600_000)
@@ -342,6 +350,7 @@ def create_app(
             weekly_miles=body.weekly_miles,
             highway_percent=body.highway_percent,
             driving_updated_at=utcnow() if body.weekly_miles is not None or body.highway_percent is not None else None,
+            driving_source="manual" if body.weekly_miles is not None or body.highway_percent is not None else None,
             nickname=clean_name(body.nickname),
             exterior_color=clean_name(body.exterior_color),
             image_status="pending" if body.make and body.model and body.exterior_color else "needs_color",
@@ -370,6 +379,7 @@ def create_app(
             changes["odometer_updated_at"] = utcnow()
         if "weekly_miles" in changes or "highway_percent" in changes:
             changes["driving_updated_at"] = utcnow()
+            changes["driving_source"] = "manual"
         updated = vehicle.model_copy(update=changes)
         if image_identity(updated) != image_identity(vehicle):
             updated = updated.model_copy(update={"generated_image_data_url": None,
@@ -389,11 +399,33 @@ def create_app(
         await generate_vehicle_image(vehicle_id, image_identity(pending))
         return vehicle_or_404(vehicle_id)[0]
 
+    @app.put("/vehicles/{vehicle_id}/driving-summary")
+    def update_driving_summary(vehicle_id: str, body: DrivingSummaryIn) -> VehicleProfile:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        now = utcnow()
+        changes: dict = {}
+        if body.weekly_miles is not None:
+            changes.update(weekly_miles=round(body.weekly_miles, 1), highway_percent=body.highway_percent,
+                           driving_source="gps", driving_updated_at=now)
+        if body.lat is not None and body.lon is not None:
+            # 약 1km 단위로만 저장한다. 날씨 조회 외에는 쓰지 않는다.
+            changes.update(location_lat=round(body.lat, 2), location_lon=round(body.lon, 2), location_updated_at=now)
+        if not changes:
+            raise HTTPException(422, "send weekly_miles or lat/lon")
+        updated = vehicle.model_copy(update=changes)
+        store.save_vehicle(updated)
+        return updated
+
+    def vehicle_coords(vehicle: VehicleProfile) -> tuple[float, float] | None:
+        if vehicle.location_lat is None or vehicle.location_lon is None:
+            return None
+        return (vehicle.location_lat, vehicle.location_lon)
+
     @app.get("/vehicles/{vehicle_id}/care-recommendations")
     async def care_recommendations(vehicle_id: str) -> dict:
         vehicle, _ = vehicle_or_404(vehicle_id)
         now = utcnow()
-        environment = await environment_provider.get(vehicle.region)
+        environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
         recommendations: list[Recommendation] = calculate_recommendations(vehicle, store.list_records(vehicle_id), now, environment)
         return {
             "recommendations": [item.model_dump(mode="json") for item in recommendations],
@@ -581,11 +613,12 @@ def create_app(
         vehicle, spec = vehicle_or_404(body.vehicle_id)
         records = store.list_records(vehicle.vehicle_id)
         weather = None
-        if body.lat is not None and body.lon is not None:
-            weather = await fetch_weather(body.lat, body.lon)
+        coords = (body.lat, body.lon) if body.lat is not None and body.lon is not None else vehicle_coords(vehicle)
+        if coords is not None:
+            weather = await fetch_weather(*coords)
         now = utcnow()
         facts = build_facts(vehicle, spec, records, weather, now)
-        environment = await environment_provider.get(vehicle.region)
+        environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
         text = render_briefing(facts, recommendations=calculate_recommendations(vehicle, records, now, environment))
         return BriefingOut(text=text, facts=[f.model_dump(mode="json") for f in facts])
 

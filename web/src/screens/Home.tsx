@@ -4,7 +4,7 @@ import { VehiclePhoto } from "../components/VehiclePhoto";
 import { api, type CareResponse, type MaintenanceRecord, type Vehicle } from "../lib/api";
 import { parseUtterance } from "../lib/commands";
 import { DrivingGate } from "../lib/drivingGate";
-import { DriveMetrics, type DriveSummary } from "../lib/driveMetrics";
+import { DriveMetrics, type DriveFix, type DriveSummary } from "../lib/driveMetrics";
 import { useUtterances, useVoice } from "../voiceContext";
 import { Captions, type Caption } from "./Captions";
 import { RecordForm } from "./RecordForm";
@@ -76,6 +76,8 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   if (metricsRef.current === null) metricsRef.current = new DriveMetrics(vehicleId);
   const [driveSummary, setDriveSummary] = useState<DriveSummary>(() => metricsRef.current!.summary());
   const watchIdRef = useRef<number | null>(null);
+  const gpsSyncRef = useRef<{ at: number; miles: number | null; highway: number | null; lat: number | null; lon: number | null } | null>(null);
+  const gpsSyncAttemptRef = useRef(0);
   const watchGenerationRef = useRef(0);
   const speedClearTimerRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
@@ -209,6 +211,34 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     }
   };
 
+  // GPS 기록을 서버 차량 정보로 보낸다. 2분에 한 번, 값이 바뀌었을 때만 보낸다.
+  const syncGps = (fix: DriveFix, summary: DriveSummary) => {
+    const now = Date.now();
+    if (now - gpsSyncAttemptRef.current < 120_000) return;
+    const last = gpsSyncRef.current;
+    const weeklyMiles = summary.weekMeters === null ? null : Math.round(summary.weekMeters / 1609.344);
+    const highway = summary.weekMeters ? Math.round((summary.weekHighwayMeters / summary.weekMeters) * 100) : null;
+    // 약 1km 단위로 반올림해 보낸다. 날씨 조회에만 쓴다.
+    const located = Number.isFinite(fix.accuracy) && fix.accuracy <= 1000;
+    const lat = located ? Math.round(fix.latitude * 100) / 100 : null;
+    const lon = located ? Math.round(fix.longitude * 100) / 100 : null;
+    const moved = lat !== null && (lat !== last?.lat || lon !== last?.lon);
+    const driving = weeklyMiles !== null && (weeklyMiles !== last?.miles || highway !== last?.highway);
+    if (!moved && !driving) return;
+    gpsSyncAttemptRef.current = now;
+    api.drivingSummary(vehicleId, {
+      ...(weeklyMiles !== null ? { weekly_miles: weeklyMiles, highway_percent: highway } : {}),
+      ...(lat !== null && lon !== null ? { lat, lon } : {}),
+    })
+      .then((updated) => {
+        gpsSyncRef.current = { at: now, miles: weeklyMiles, highway, lat: lat ?? last?.lat ?? null, lon: lon ?? last?.lon ?? null };
+        setVehicle(updated);
+        // 위치가 바뀌면 그 지역 날씨로 관리 추천을 다시 계산한다.
+        if (moved) api.care(vehicleId).then(setCare).catch(() => undefined);
+      })
+      .catch(() => undefined);
+  };
+
   const stopTracking = () => {
     trackingActiveRef.current = false;
     watchGenerationRef.current += 1;
@@ -242,7 +272,9 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
             speed: position.coords.speed,
             timestamp: position.timestamp,
           };
-          setDriveSummary(metricsRef.current!.observe(fix));
+          const summary = metricsRef.current!.observe(fix);
+          setDriveSummary(summary);
+          syncGps(fix, summary);
           if (speedClearTimerRef.current !== null) window.clearTimeout(speedClearTimerRef.current);
           speedClearTimerRef.current = window.setTimeout(() => setDriveSummary(metricsRef.current!.summary()), 21_000);
           if (autoEnabledRef.current && gateRef.current.observe(fix)) {
@@ -354,6 +386,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     }
   };
 
+  const weekHighway = driveSummary.weekMeters ? Math.round((driveSummary.weekHighwayMeters / driveSummary.weekMeters) * 100) : null;
   const washerCare = care?.recommendations.find((item) => item.component === "washer_fluid");
   const tireCare = care?.recommendations.find((item) => item.component === "tires");
   const shouldCheck = washerCare?.priority !== "ROUTINE";
@@ -407,7 +440,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
           {briefingState !== "idle" && <span className="drive-played-note" aria-live="polite">{briefingState === "loading" ? "Preparing briefing…" : briefingState === "speaking" ? "Speaking now…" : "Briefing played"}</span>}
           </div>
         </section>
-        <section className="driving-insights-card"><div className="driving-insights-heading"><span className="section-overline">DRIVING PROFILE</span><button type="button" onClick={() => setProfileOpen(true)}>Edit profile <Icon name="chevron" size={15}/></button></div><h2>Driving insights</h2><div className="driving-insights-grid"><div><strong>{vehicle?.weekly_miles === null || !vehicle ? "—" : `${vehicle.weekly_miles} mi`}</strong><span>Typical week</span></div><div><strong>{vehicle?.highway_percent === null || !vehicle ? "—" : `${vehicle.highway_percent}%`}</strong><span>Highway estimate</span></div><div><strong>{vehicle?.highway_percent === null || !vehicle ? "—" : `${100 - vehicle.highway_percent}%`}</strong><span>City estimate</span></div></div><p>{`Based on your driving profile${vehicle?.driving_updated_at ? ` · Updated ${new Date(vehicle.driving_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}.`} {care?.environment.status === "available" ? `Open-Meteo: ${care.environment.rainfall_mm?.toFixed(1)} mm rain in the past 7 days for ${care.environment.area}.` : "Recent weather unavailable."}</p></section>
+        <section className="driving-insights-card"><div className="driving-insights-heading"><span className="section-overline">PHONE GPS</span><button type="button" onClick={toggleStatusTracking}>{trackingEnabled ? "Stop tracking" : "Start tracking"}</button></div><h2>Driving insights</h2><div className="driving-insights-grid"><div><strong>{miles(driveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway share</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City share</span></div></div><p>{driveSummary.weekTrackedDays ? `Tracked on ${driveSummary.weekTrackedDays} ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} in the past 7 days while location was on.` : trackingEnabled ? "Tracking now. Distance appears once you start driving." : "Start tracking to build this from phone GPS while Carmori is open."} {care?.environment.status === "available" ? `Open-Meteo: ${care.environment.rainfall_mm?.toFixed(1)} mm rain in the past 7 days ${care.environment.area ? `for ${care.environment.area}` : "near your last GPS location"}.` : "Recent weather unavailable."}</p></section>
         <section className="care-section" aria-label="Your care priorities">
           <div className="care-section-heading"><div><span className="section-overline">PERSONALIZED CARE</span><h2>Your care priorities</h2></div><button type="button" onClick={() => void refreshData()} aria-label="Recalculate care priorities"><Icon name="refresh" size={17}/></button></div>
           {careLoading && <div className="care-loading">Reviewing your vehicle and maintenance history…</div>}

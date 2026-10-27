@@ -37,6 +37,10 @@ export interface Vehicle {
   weekly_miles: number | null;
   highway_percent: number | null;
   driving_updated_at: string | null;
+  driving_source: "gps" | "manual" | null;
+  location_lat: number | null;
+  location_lon: number | null;
+  location_updated_at: string | null;
   nickname: string | null;
   exterior_color: string | null;
   generated_image_data_url: string | null;
@@ -48,7 +52,7 @@ export interface Vehicle {
 export interface CareEvidence {
   label: string;
   value: string;
-  source: "vehicle_profile" | "maintenance_record" | "user_driving_profile" | "external_weather";
+  source: "vehicle_profile" | "maintenance_record" | "user_driving_profile" | "phone_gps" | "external_weather";
   record_id: string | null;
 }
 
@@ -172,6 +176,9 @@ export const api = {
   vehicle: (vehicleId: string) => call<Vehicle>(`/vehicles/${vehicleId}`),
   updateVehicle: (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname">>) =>
     call<Vehicle>(`/vehicles/${vehicleId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // Phone GPS: distance over the past 7 days and an approximate location for weather.
+  drivingSummary: (vehicleId: string, body: { weekly_miles?: number; highway_percent?: number | null; lat?: number; lon?: number }) =>
+    call<Vehicle>(`/vehicles/${vehicleId}/driving-summary`, { method: "PUT", body: JSON.stringify(body) }),
   retryVehicleImage: (vehicleId: string) => post<Vehicle>(`/vehicles/${vehicleId}/generate-image`, {}),
   memory: (vehicleId: string) => call<MaintenanceRecord[]>(`/vehicles/${vehicleId}/memory`),
   care: (vehicleId: string) => call<CareResponse>(`/vehicles/${vehicleId}/care-recommendations`),

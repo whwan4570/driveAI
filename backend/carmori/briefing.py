@@ -44,7 +44,13 @@ def build_facts(
         facts.append(Fact(id="odometer", text=f"The saved odometer is {vehicle.odometer_km / 1.609344:,.0f} miles.", source="profile", as_of=vehicle.odometer_updated_at))
     if vehicle.weekly_miles is not None:
         highway = f" and an estimated {vehicle.highway_percent}% highway share" if vehicle.highway_percent is not None else ""
-        facts.append(Fact(id="driving_profile", text=f"The driver entered {vehicle.weekly_miles:,.0f} typical miles per week{highway}.", source="user_driving_profile", as_of=vehicle.driving_updated_at))
+        if vehicle.driving_source == "gps":
+            text = f"Phone GPS tracked {vehicle.weekly_miles:,.0f} miles in the past 7 days{highway}."
+            source = "phone_gps"
+        else:
+            text = f"The driver entered {vehicle.weekly_miles:,.0f} typical miles per week{highway}."
+            source = "user_driving_profile"
+        facts.append(Fact(id="driving_profile", text=text, source=source, as_of=vehicle.driving_updated_at))
     last = latest_refill(records)
     if last is None:
         facts.append(Fact(id="last_refill", text="There is no washer fluid refill on record.", source="records"))

@@ -22,29 +22,34 @@ class EnvironmentContext(BaseModel):
 
 
 class EnvironmentProvider(Protocol):
-    async def get(self, region: str | None) -> EnvironmentContext: ...
+    async def get(self, region: str | None, coords: tuple[float, float] | None = None) -> EnvironmentContext: ...
 
 
 class OpenMeteoEnvironment:
     def __init__(self) -> None:
         self._cache: dict[str, tuple[datetime, EnvironmentContext]] = {}
 
-    async def get(self, region: str | None) -> EnvironmentContext:
-        if not region:
+    async def get(self, region: str | None, coords: tuple[float, float] | None = None) -> EnvironmentContext:
+        # GPS coordinates win over a typed region; area stays None for GPS lookups.
+        if coords is None and not region:
             return EnvironmentContext(area=None)
+        key = f"gps:{coords[0]:.2f},{coords[1]:.2f}" if coords else f"region:{region}"
         now = datetime.now(timezone.utc)
-        cached = self._cache.get(region)
+        cached = self._cache.get(key)
         if cached and (now - cached[0]).total_seconds() < 900:
             return cached[1]
-        unavailable = EnvironmentContext(area=region)
+        unavailable = EnvironmentContext(area=None if coords else region)
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                place_response = await client.get(GEOCODING_URL, params={"name": region, "count": 1})
-                place_response.raise_for_status()
-                places = place_response.json().get("results") or []
-                if not places:
-                    return unavailable
-                place = places[0]
+                if coords:
+                    place: dict = {"latitude": coords[0], "longitude": coords[1]}
+                else:
+                    place_response = await client.get(GEOCODING_URL, params={"name": region, "count": 1})
+                    place_response.raise_for_status()
+                    places = place_response.json().get("results") or []
+                    if not places:
+                        return unavailable
+                    place = places[0]
                 weather_response = await client.get(OPEN_METEO_URL, params={
                     "latitude": place["latitude"], "longitude": place["longitude"],
                     "daily": "rain_sum", "past_days": 7, "forecast_days": 1, "timezone": "auto",
@@ -54,11 +59,11 @@ class OpenMeteoEnvironment:
             days, rain = daily["time"][:-1], daily["rain_sum"][:-1]
             if not days or len(days) != len(rain) or any(value is None for value in rain):
                 return unavailable
-            area = ", ".join(str(item) for item in (place.get("name"), place.get("admin1"), place.get("country_code")) if item)
+            area = ", ".join(str(item) for item in (place.get("name"), place.get("admin1"), place.get("country_code")) if item) or None
             result = EnvironmentContext(status="available", area=area,
                                         time_window=f"{days[0]} to {days[-1]}",
                                         last_successful_update=now, rainfall_mm=round(sum(rain), 1))
-            self._cache[region] = (now, result)
+            self._cache[key] = (now, result)
             return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError):
             return unavailable
