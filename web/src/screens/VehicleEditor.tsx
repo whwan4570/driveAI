@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
+import { VehiclePicker } from "../components/VehiclePicker";
 import { api, type Vehicle } from "../lib/api";
 
 export function VehicleEditor({ vehicle, onSaved, onCancel }: {
@@ -24,6 +25,7 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    if (!make.trim() || !model.trim()) { setError("Choose your vehicle make and model."); return; }
     setSaving(true);
     setError(null);
     try {
@@ -45,7 +47,7 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
   return <div className="vehicle-editor">
     <div className="page-heading"><p className="eyebrow">MY VEHICLE</p><h1>Edit vehicle</h1><p>Keep your care suggestions grounded in current details.</p></div>
     <form className="setup-form" onSubmit={(event) => void save(event)}>
-      <div className="review-fields"><label>Make<input value={make} onChange={(event) => setMake(event.target.value)} required maxLength={60}/></label><label>Model<input value={model} onChange={(event) => setModel(event.target.value)} required maxLength={60}/></label></div>
+      <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
       <div className="review-fields"><label>Model year<input type="number" min="1981" max="2035" value={year} onChange={(event) => setYear(event.target.value)} required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(event) => setTrim(event.target.value)} maxLength={60}/></label></div>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
       <label>Exterior color<input value={exteriorColor} onChange={(event) => setExteriorColor(event.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
+import { VehiclePicker } from "../components/VehiclePicker";
 import { api, type DocumentType, type VehicleScanResult, type VehicleSpecView } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
 
@@ -231,7 +232,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}</p></>
         : <><h2>Vehicle details</h2><p className="review-note">Add your car and driving profile to personalize care suggestions.</p></>}
-      <div className="review-fields"><label>Make<input value={make} onChange={(e) => setMake(e.target.value)} required maxLength={60} placeholder="e.g. Honda"/></label><label>Model<input value={model} onChange={(e) => setModel(e.target.value)} required maxLength={60} placeholder="e.g. Civic"/></label></div>
+      <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
       {specs.length > 1 && <label>Vehicle guide<select value={specId} onChange={(e) => setSpecId(e.target.value)}>{specs.map((s) => <option key={s.spec_id} value={s.spec_id}>{s.display_name}</option>)}</select></label>}
       <div className="review-fields"><label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(e) => setTrim(e.target.value)} maxLength={60} placeholder="e.g. EX"/></label></div>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,7 @@ from .state_machine import TransitionResult, apply_voice, new_session, transitio
 from .store import MemoryStore, SQLiteStore, Store
 from .vehicles import SUPPORTED_SPECS, VehicleSpec, get_spec
 from .vehicle_recognition import DocumentMime, DocumentType, MetaVehicleRecognizer, ScanMode, VehicleRecognizer, VehicleScanResult, clean_name
+from .vehicle_catalog import MAKES, POPULAR_MAKES, ModelCatalog, NhtsaModelCatalog
 from .vehicle_image import MetaVehicleImageGenerator, VehicleImageError, VehicleImageGenerator
 from .weather import EnvironmentProvider, OpenMeteoEnvironment, fetch_weather
 
@@ -200,6 +201,7 @@ def create_app(
     inspector: Inspector | None = None,
     image_generator: VehicleImageGenerator | None = None,
     environment_provider: EnvironmentProvider | None = None,
+    model_catalog: ModelCatalog | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     spark = spark or make_spark_client(settings)
@@ -208,6 +210,7 @@ def create_app(
     inspector = inspector or (MetaInspector(spark) if isinstance(spark, MetaSparkClient) else UnavailableInspector())
     image_generator = image_generator or MetaVehicleImageGenerator(settings)
     environment_provider = environment_provider or OpenMeteoEnvironment()
+    model_catalog = model_catalog or NhtsaModelCatalog()
     locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
     reference_frames: dict[str, bytes] = {}
     model_access = {"status": "unverified" if settings.meta_api_key else "missing_key"}
@@ -270,6 +273,22 @@ def create_app(
             {"spec_id": s.spec_id, "display_name": s.display_name, "years": list(s.years)}
             for s in SUPPORTED_SPECS.values()
         ]
+
+    @app.get("/vehicle-catalog/makes")
+    def vehicle_makes() -> dict[str, list[str]]:
+        return {"makes": list(MAKES), "popular": list(POPULAR_MAKES)}
+
+    @app.get("/vehicle-catalog/models")
+    async def vehicle_models(
+        make: str = Query(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9 .&'-]*$"),
+        year: int | None = Query(default=None, ge=1981, le=2035),
+    ) -> dict:
+        # 목록을 못 불러와도 직접 입력으로 계속 진행할 수 있게 실패를 상태로 돌려준다.
+        try:
+            models = await model_catalog.models(make.strip(), year)
+        except (httpx.HTTPError, ValueError):
+            return {"make": make, "year": year, "models": [], "status": "unavailable"}
+        return {"make": make, "year": year, "models": models, "status": "available"}
 
     @app.get("/vehicles/recognition-status")
     def vehicle_recognition_status() -> dict[str, bool]:

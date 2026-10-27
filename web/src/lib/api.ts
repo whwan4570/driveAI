@@ -157,6 +157,11 @@ const post = <T>(path: string, body: unknown) =>
 export const api = {
   health: () => call<{ ok: boolean; spark: string; demo_mode: boolean; vision_status: "unverified" | "ready" | "missing_key" | "billing_required" | "unauthorized" | "provider_error" }>("/health"),
   vehicleSpecs: () => call<VehicleSpecView[]>("/vehicle-specs"),
+  vehicleMakes: () => call<{ makes: string[]; popular: string[] }>("/vehicle-catalog/makes"),
+  vehicleModels: (make: string, year: number | null) =>
+    call<{ models: string[]; status: "available" | "unavailable" }>(
+      `/vehicle-catalog/models?${new URLSearchParams({ make, ...(year ? { year: String(year) } : {}) })}`,
+    ),
   recognitionStatus: () => call<{ available: boolean }>("/vehicles/recognition-status"),
   recognizeVehicle: (body: { mode: "vin" | "exterior"; jpeg_base64: string }) =>
     post<VehicleScanResult>("/vehicles/recognize", body),
