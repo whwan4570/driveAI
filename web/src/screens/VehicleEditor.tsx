@@ -34,7 +34,9 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
         nickname: nickname.trim() || null, exterior_color: exteriorColor.trim(),
         odometer_km: Math.round(Number(odometer) * (unit === "mi" ? 1.609344 : 1)),
         odometer_updated_at: new Date(`${odometerDate}T12:00:00`).toISOString(),
-        region: region.trim(), weekly_miles: Number(weeklyMiles), highway_percent: Number(highwayPercent),
+        region: region.trim() || null,
+        // 비워 두면 null로 저장한다. 주행 거리는 GPS 기록으로 채운다.
+        weekly_miles: weeklyMiles.trim() ? Number(weeklyMiles) : null, highway_percent: highwayPercent.trim() ? Number(highwayPercent) : null,
       });
       onSaved(updated);
     } catch {
@@ -54,8 +56,8 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
       <p className="form-help">Changing the vehicle or paint color creates a new image automatically.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(event) => setOdometer(event.target.value)} required/></label><label>Unit<select value={unit} onChange={(event) => setUnit(event.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>
       <label>Odometer reading date<input type="date" value={odometerDate} onChange={(event) => setOdometerDate(event.target.value)} required/></label>
-      <label>City or region<input value={region} onChange={(event) => setRegion(event.target.value)} required maxLength={120}/></label>
-      <div className="review-fields"><label>Typical miles / week<input type="number" min="0" max="3000" step="1" value={weeklyMiles} onChange={(event) => setWeeklyMiles(event.target.value)} required/></label><label>Highway driving %<input type="number" min="0" max="100" step="1" value={highwayPercent} onChange={(event) => setHighwayPercent(event.target.value)} required/></label></div>
+      <label>City or region <span className="optional">optional</span><input value={region} onChange={(event) => setRegion(event.target.value)} maxLength={120} placeholder="Used for local weather"/></label>
+      <div className="review-fields"><label>Typical miles / week <span className="optional">optional</span><input type="number" min="0" max="3000" step="1" value={weeklyMiles} onChange={(event) => setWeeklyMiles(event.target.value)} placeholder="From GPS"/></label><label>Highway driving % <span className="optional">optional</span><input type="number" min="0" max="100" step="1" value={highwayPercent} onChange={(event) => setHighwayPercent(event.target.value)} placeholder="0–100"/></label></div>
       <p className="form-help"><Icon name="shield" size={16}/>Care suggestions use your saved estimates and confirmed records.</p>
       {error && <div className="inline-error" role="alert">{error}</div>}
       <button className="primary action-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save vehicle"}</button>

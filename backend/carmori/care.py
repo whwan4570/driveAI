@@ -102,8 +102,8 @@ def calculate_recommendations(
         tire_explanation = "A tire action was confirmed. Check again if you notice pressure loss, damage, or unusual handling."
     elif vehicle.weekly_miles is None:
         tire_priority = "INFORMATION_NEEDED"
-        tire_title = "Add driving distance for tire care"
-        tire_explanation = "Carmori needs your typical weekly mileage and an inspection record to tailor a tire check."
+        tire_title = "Record a tire inspection"
+        tire_explanation = "Your typical weekly mileage is not known yet, and no confirmed tire inspection is recorded. A visual check or gauge reading would improve this recommendation."
     elif vehicle.weekly_miles >= 200:
         tire_priority = "CHECK_SOON"
         tire_title = "Inspect your tires soon"

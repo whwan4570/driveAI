@@ -35,9 +35,6 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
   const [odometer, setOdometer] = useState("");
   const [odometerUnit, setOdometerUnit] = useState<"mi" | "km">("mi");
   const [odometerDate, setOdometerDate] = useState("");
-  const [region, setRegion] = useState("");
-  const [weeklyMiles, setWeeklyMiles] = useState("");
-  const [highwayPercent, setHighwayPercent] = useState("");
   const [mode, setMode] = useState<ScanMode>("vin");
   const [documentType, setDocumentType] = useState<DocumentType>("buyers_guide");
   const [documentName, setDocumentName] = useState("");
@@ -138,13 +135,10 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     if (!specId || saving) return;
     const spec = specs.find((item) => item.spec_id === specId);
     const mileage = Number(odometer);
-    const weekly = Number(weeklyMiles);
-    const highway = Number(highwayPercent);
     if (typeof year !== "number" || !spec || year < spec.years[0] || year > spec.years[1] ||
       !make.trim() || !model.trim() || !exteriorColor.trim() || !odometer.trim() || !Number.isFinite(mileage) || mileage < 0 ||
-      !odometerDate || !region.trim() || !weeklyMiles.trim() || !Number.isFinite(weekly) || weekly < 0 || weekly > 3000 ||
-      !highwayPercent.trim() || !Number.isInteger(highway) || highway < 0 || highway > 100) {
-      setError("Add your vehicle, exterior color, odometer, region, and driving profile before continuing.");
+      !odometerDate) {
+      setError("Add your vehicle, exterior color, and odometer before continuing.");
       return;
     }
     setSaving(true);
@@ -157,7 +151,6 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
         nickname: nickname.trim() || undefined, exterior_color: exteriorColor.trim(),
         odometer_km: Math.round(mileage * (odometerUnit === "mi" ? 1.609344 : 1)),
         odometer_updated_at: new Date(`${odometerDate}T12:00:00`).toISOString(),
-        region: region.trim(), weekly_miles: weekly, highway_percent: highway,
         profile_source: scanResult?.source === "document" ? "document" : scanResult ? "scan" : "manual",
       });
       onRegistered(vehicle.vehicle_id);
@@ -231,7 +224,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
 
     {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}</p></>
-        : <><h2>Vehicle details</h2><p className="review-note">Add your car and driving profile to personalize care suggestions.</p></>}
+        : <><h2>Vehicle details</h2><p className="review-note">Add your car to personalize care suggestions.</p></>}
       <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
       {specs.length > 1 && <label>Vehicle guide<select value={specId} onChange={(e) => setSpecId(e.target.value)}>{specs.map((s) => <option key={s.spec_id} value={s.spec_id}>{s.display_name}</option>)}</select></label>}
       <div className="review-fields"><label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(e) => setTrim(e.target.value)} maxLength={60} placeholder="e.g. EX"/></label></div>
@@ -240,10 +233,8 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       <p className="review-note">Carmori creates your vehicle image automatically from these confirmed details.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="Current reading" required/></label><label>Unit<select value={odometerUnit} onChange={(e) => setOdometerUnit(e.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>
       <label>Odometer reading date<input type="date" value={odometerDate} onChange={(e) => setOdometerDate(e.target.value)} required/></label>
-      <label>City or region<input value={region} onChange={(e) => setRegion(e.target.value)} maxLength={120} placeholder="e.g. San Francisco, CA" required/></label>
-      <div className="review-fields"><label>Typical miles / week<input type="number" min="0" max="3000" step="1" value={weeklyMiles} onChange={(e) => setWeeklyMiles(e.target.value)} placeholder="Your estimate" required/></label><label>Highway driving %<input type="number" min="0" max="100" step="1" value={highwayPercent} onChange={(e) => setHighwayPercent(e.target.value)} placeholder="0–100" required/></label></div>
-      <p className="form-help"><Icon name="shield" size={16}/>Estimates come from your entries. You can edit them later.</p>
-      {scanResult && <button className="secondary action-button" type="button" onClick={confirmByVoice} disabled={listening || saving || !year || !make.trim() || !model.trim() || !exteriorColor.trim() || !odometer || !region.trim() || !weeklyMiles || !highwayPercent || !odometerDate}><Icon name="mic" size={18}/>{listening ? "Listening for confirmation…" : "Confirm by voice"}</button>}
+      <p className="form-help"><Icon name="shield" size={16}/>Driving distance is tracked with GPS while location is on.</p>
+      {scanResult && <button className="secondary action-button" type="button" onClick={confirmByVoice} disabled={listening || saving || !year || !make.trim() || !model.trim() || !exteriorColor.trim() || !odometer || !odometerDate}><Icon name="mic" size={18}/>{listening ? "Listening for confirmation…" : "Confirm by voice"}</button>}
       <button className="primary action-button" type="submit" disabled={!specId || saving}>{saving ? "Saving…" : scanResult ? "Confirm vehicle" : "Get started"}<Icon name="arrow" size={18}/></button>
       <button className="text-button" type="button" onClick={() => { setScanResult(null); setManual(false); setError(null); }}>Scan {scanResult ? "again" : "my car"} <Icon name="chevron" size={17}/></button>
     </form>}

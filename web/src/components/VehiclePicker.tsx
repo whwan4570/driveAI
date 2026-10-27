@@ -85,8 +85,8 @@ export function VehiclePicker({ make, model, year, onChange }: {
 
   return <>
     <div className="review-fields">
-      <div className="picker-field"><span>Make</span><button type="button" className={`picker-button${make ? "" : " empty"}`} onClick={() => open("make")} aria-haspopup="dialog"><span>{make || "Choose make"}</span><Icon name="chevron" size={16}/></button></div>
-      <div className="picker-field"><span>Model</span><button type="button" className={`picker-button${model ? "" : " empty"}`} onClick={() => open(make ? "model" : "make")} aria-haspopup="dialog"><span>{model || (make ? "Choose model" : "Choose make first")}</span><Icon name="chevron" size={16}/></button></div>
+      <div className="picker-field"><span>Make</span><button type="button" className={`picker-button${make ? "" : " empty"}`} onClick={() => open("make")} aria-haspopup="dialog"><span>{make || "Select"}</span><Icon name="chevron" size={16}/></button></div>
+      <div className="picker-field"><span>Model</span><button type="button" className={`picker-button${model ? "" : " empty"}`} onClick={() => open(make ? "model" : "make")} aria-haspopup="dialog"><span>{model || "Select"}</span><Icon name="chevron" size={16}/></button></div>
     </div>
 
     {sheet && createPortal(<div className="picker-backdrop" onClick={() => setSheet(null)}>

@@ -167,7 +167,7 @@ export const api = {
     post<VehicleScanResult>("/vehicles/recognize", body),
   recognizeDocument: (body: { document_type: DocumentType; mime_type: "image/jpeg" | "image/png" | "application/pdf"; data_base64: string }) =>
     post<VehicleScanResult>("/vehicles/recognize-document", body),
-  createVehicle: (body: { spec_id: string; year: number; make: string; model: string; trim?: string; exterior_color: string; odometer_km: number; odometer_updated_at: string; region: string; weekly_miles: number; highway_percent: number; nickname?: string; profile_source: "manual" | "scan" | "document" | "demo" }) =>
+  createVehicle: (body: { spec_id: string; year: number; make: string; model: string; trim?: string; exterior_color: string; odometer_km: number; odometer_updated_at: string; region?: string; weekly_miles?: number; highway_percent?: number; nickname?: string; profile_source: "manual" | "scan" | "document" | "demo" }) =>
     post<Vehicle>("/vehicles", body),
   vehicle: (vehicleId: string) => call<Vehicle>(`/vehicles/${vehicleId}`),
   updateVehicle: (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname">>) =>
