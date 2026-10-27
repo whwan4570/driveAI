@@ -42,7 +42,7 @@ class Recommendation(BaseModel):
 
 
 def _latest(records: list[MaintenanceRecord], component: Component) -> MaintenanceRecord | None:
-    relevant = [record for record in records if record.component == component and record.user_confirmed]
+    relevant = [record for record in records if record.component == component and record.confirmed]
     return max(relevant, key=lambda record: record.completed_at, default=None)
 
 

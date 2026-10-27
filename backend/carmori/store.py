@@ -65,7 +65,7 @@ class MemoryStore:
             product_label=event.product_label,
             flow_observed=event.flow_observed,
             model_version=model_version,
-            user_confirmed=event.completion_source is CompletionSource.USER_VOICE_CONFIRMED,
+            user_confirmed=event.completion_source is not CompletionSource.OBSERVED_SEQUENCE,
             created_at=event.completed_at,
             updated_at=event.completed_at,
         )
@@ -166,7 +166,7 @@ class SQLiteStore:
                 product_label=event.product_label,
                 flow_observed=event.flow_observed,
                 model_version=model_version,
-                user_confirmed=event.completion_source is CompletionSource.USER_VOICE_CONFIRMED,
+                user_confirmed=event.completion_source is not CompletionSource.OBSERVED_SEQUENCE,
                 created_at=event.completed_at,
                 updated_at=event.completed_at,
             )

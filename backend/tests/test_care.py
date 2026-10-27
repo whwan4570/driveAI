@@ -13,7 +13,9 @@ from carmori.main import create_app
 from carmori.spark import HappyPathSpark
 from carmori.weather import EnvironmentContext, OpenMeteoEnvironment
 from carmori.care import calculate_recommendations
-from carmori.models import VehicleProfile
+from carmori.briefing import build_facts, render_memory_answer
+from carmori.models import CompletionSource, MaintenanceRecord, VehicleProfile
+from carmori.vehicles import DEMO_SPEC
 
 
 class NoWeather:
@@ -178,3 +180,19 @@ def test_weather_provider_failure_stays_unavailable(monkeypatch):
     monkeypatch.setattr("carmori.weather.httpx.AsyncClient", FailedClient)
     result = asyncio.run(OpenMeteoEnvironment().get("Seattle, WA"))
     assert result.status == "unavailable" and result.rainfall_mm is None
+
+
+def test_camera_observed_refill_counts_as_completed_work():
+    now = datetime.now(timezone.utc)
+    vehicle = VehicleProfile(vehicle_id="v1", spec_id="demo", year=2021, created_at=now)
+    observed = MaintenanceRecord(
+        record_id="r1", vehicle_id="v1", completed_at=now,
+        completion_source=CompletionSource.OBSERVED_SEQUENCE, user_confirmed=False,
+    )
+    washer = calculate_recommendations(vehicle, [observed], now)[-1]
+    assert washer.component == "washer_fluid" and washer.priority == "ROUTINE"
+    assert washer.evidence[-1].record_id == "r1"
+    last_refill = next(f for f in build_facts(vehicle, DEMO_SPEC, [observed], None, now) if f.id == "last_refill")
+    assert last_refill.text == "The last washer fluid refill was logged today, observed by camera."
+    text, ids = render_memory_answer([observed], now)
+    assert "observed by camera" in text and ids == ["r1"]

@@ -27,7 +27,7 @@ class Fact(BaseModel):
 
 
 def latest_refill(records: Sequence[MaintenanceRecord]) -> MaintenanceRecord | None:
-    refills = [r for r in records if r.component == "washer_fluid" and r.event_type == "refill" and r.user_confirmed]
+    refills = [r for r in records if r.component == "washer_fluid" and r.event_type == "refill" and r.confirmed]
     return max(refills, key=lambda r: r.completed_at, default=None)
 
 
@@ -62,7 +62,7 @@ def build_facts(
     facts.append(
         Fact(id="level_unknown", text="I have not checked the actual washer fluid level.", source="system")
     )
-    tires = [record for record in records if record.component == "tires" and record.user_confirmed]
+    tires = [record for record in records if record.component == "tires" and record.confirmed]
     tire = max(tires, key=lambda record: record.completed_at, default=None)
     facts.append(Fact(id="tire_history", text=f"The last confirmed tire action was {tire.event_type} on {tire.completed_at.date().isoformat()}." if tire else "There is no confirmed tire inspection on record.", source="records", as_of=tire.completed_at if tire else None))
     facts.append(Fact(id="manufacturer_guidance", text="Vehicle-specific manufacturer service guidance is unavailable.", source="system"))
@@ -108,7 +108,7 @@ def is_memory_question(text: str) -> bool:
 
 
 def render_memory_answer(records: Sequence[MaintenanceRecord], now: datetime) -> tuple[str, list[str]]:
-    last = max((record for record in records if record.user_confirmed), key=lambda record: record.completed_at, default=None)
+    last = max((record for record in records if record.confirmed), key=lambda record: record.completed_at, default=None)
     if last is None:
         return "There is no confirmed maintenance on record yet.", []
     when = last.completed_at.strftime("%b %d, %Y at %H:%M UTC")

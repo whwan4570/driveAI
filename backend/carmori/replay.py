@@ -16,6 +16,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,7 @@ class ClipEvent(BaseModel):
     frames: list[str] = Field(default_factory=list)
     answer: SceneAnswer | None = None
     voice: VoiceIntent | None = None
+    via: Literal["voice", "touch"] = "voice"
     # 서버가 이 관찰을 처리한 시각(초). 없으면 t + latency.
     arrives: float | None = None
 
@@ -82,7 +84,7 @@ def run_clip(clip: Clip, *, rules: Rules = DEFAULT_RULES, latency_s: float = 2.5
         now = EPOCH + timedelta(seconds=event.arrives if event.arrives is not None else event.t + latency_s)
         before = state.step
         if event.voice is not None:
-            result = apply_voice(state, event.voice, now=now)
+            result = apply_voice(state, event.voice, now=now, via=event.via)
         elif event.answer is not None and event.seq is not None:
             obs = Observation(
                 session_id=state.session_id,

@@ -149,6 +149,8 @@ class SessionIn(BaseModel):
 
 class VoiceIn(BaseModel):
     intent: VoiceIntent
+    # 화면 확인 버튼은 touch로 보내 기록 출처를 manual_entry로 남긴다.
+    via: Literal["voice", "touch"] = "voice"
 
 
 class AskIn(BaseModel):
@@ -534,7 +536,7 @@ def create_app(
     async def post_voice(session_id: str, body: VoiceIn) -> SessionUpdate:
         async with locks[session_id]:
             state = session_or_404(session_id)
-            result = apply_voice(state, body.intent, now=utcnow())
+            result = apply_voice(state, body.intent, now=utcnow(), via=body.via)
             record = save_result(result)
             if body.intent is VoiceIntent.RESTART:
                 reference_frames.pop(session_id, None)

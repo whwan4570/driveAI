@@ -54,8 +54,8 @@ class Driver:
         self.state = self.last.state
         return self.last
 
-    def voice(self, intent: VoiceIntent):
-        self.last = apply_voice(self.state, intent, now=T0 + timedelta(seconds=self.t))
+    def voice(self, intent: VoiceIntent, *, via: str = "voice"):
+        self.last = apply_voice(self.state, intent, now=T0 + timedelta(seconds=self.t), via=via)
         self.state = self.last.state
         return self.last
 
@@ -177,20 +177,17 @@ POUR_FLOW = SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_v
 DONE = SceneAnswer(cap_state=CapState.CLOSED, bottle_upright=Tri.YES)
 
 
-def test_full_observed_sequence_waits_for_user_confirmation_then_records_once():
+def test_full_observed_sequence_records_once_with_deterministic_id():
     d = at_pour()
     d.obs(POUR_FLOW)
     d.obs(POUR_FLOW)
     assert d.state.step is Step.FINISH
     d.obs(DONE)
     r = d.obs(DONE)
-    assert d.state.step is Step.FINISH
-    assert d.state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
-    assert r.completion is None
-    r = d.voice(VoiceIntent.CONFIRM_YES)
     assert d.state.step is Step.RECORDED
     assert r.completion is not None
-    assert r.completion.completion_source is CompletionSource.USER_VOICE_CONFIRMED
+    assert r.completion.completion_source is CompletionSource.OBSERVED_SEQUENCE
+    assert r.spoken_hint == "I saved the refill I observed."
     assert r.completion.completion_event_id == completion_event_id("s1", 1)
     assert r.completion.flow_observed
     assert len(r.completion.evidence_frames) == 20  # 전환 5번 × 확인 묶음 2개 × 프레임 2장
@@ -210,6 +207,31 @@ def test_tilt_without_visible_flow_needs_voice_confirmation():
     r = d.voice(VoiceIntent.CONFIRM_YES)
     assert r.completion is not None
     assert r.completion.completion_source is CompletionSource.USER_VOICE_CONFIRMED
+
+
+def test_touch_confirmation_is_stored_as_manual_entry():
+    d = at_pour()
+    tilt = SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_visible=Tri.UNCLEAR)
+    d.obs(tilt)
+    d.obs(tilt)
+    d.obs(DONE)
+    d.obs(DONE)
+    assert d.state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
+    r = d.voice(VoiceIntent.CONFIRM_YES, via="touch")
+    assert d.state.step is Step.RECORDED
+    assert r.completion.completion_source is CompletionSource.MANUAL_ENTRY
+    assert r.spoken_hint == "I saved the refill you confirmed on screen."
+
+
+def test_touch_cannot_approve_unknown_product_either():
+    d = at_open_cap()
+    d.obs(OPEN)
+    d.obs(OPEN)
+    d.obs(SceneAnswer(product_class=ProductClass.UNREADABLE))
+    assert d.state.waiting_reason is WaitReason.PRODUCT_UNKNOWN
+    r = d.voice(VoiceIntent.CONFIRM_YES, via="touch")
+    assert not r.accepted and r.completion is None
+    assert d.state.step is Step.CONFIRM_PRODUCT
 
 
 def test_voice_no_returns_to_pour():

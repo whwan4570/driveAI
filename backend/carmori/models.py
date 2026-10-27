@@ -179,3 +179,8 @@ class MaintenanceRecord(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     revision: int = 1
+
+    @property
+    def confirmed(self) -> bool:
+        """Camera-observed sequences count as completed work alongside user confirmations."""
+        return self.user_confirmed or self.completion_source is CompletionSource.OBSERVED_SEQUENCE

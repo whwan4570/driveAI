@@ -181,8 +181,9 @@ export const api = {
   startSession: (vehicleId: string) => post<SessionUpdate>("/sessions", { vehicle_id: vehicleId }),
   observe: (sessionId: string, windows: WindowIn[]) =>
     post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows }),
-  voice: (sessionId: string, intent: VoiceIntent) =>
-    post<SessionUpdate>(`/sessions/${sessionId}/voice`, { intent }),
+  // via=touch: 화면 버튼으로 보낸 확인은 manual_entry로 기록된다.
+  voice: (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") =>
+    post<SessionUpdate>(`/sessions/${sessionId}/voice`, { intent, via }),
   transcribe: async (wav: Blob): Promise<string> => {
     const res = await fetch(`${BASE}/voice/transcribe`, {
       method: "POST",

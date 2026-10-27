@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from carmori.config import Settings
 from carmori.main import create_app
+from carmori.models import SceneAnswer, Step, Tri
 from carmori.spark import HappyPathSpark
 from carmori.vehicle_recognition import VehicleScanResult, clean_vin
 
@@ -52,12 +53,10 @@ def test_happy_path_records_once_and_updates_memory():
         seq += 2
         steps.append(body["session"]["step"])
         record = body["record"] or record
-    assert steps == ["OPEN_CAP", "CONFIRM_PRODUCT", "POUR", "FINISH", "FINISH"]
-    assert record is None
-    assert client.get(f"/vehicles/{vid}/memory").json() == []
-    confirmed = client.post(f"/sessions/{sid}/voice", json={"intent": "CONFIRM_YES"}).json()
-    assert confirmed["session"]["step"] == "RECORDED"
-    assert confirmed["record"]["completion_source"] == "user_voice_confirmed"
+    assert steps == ["OPEN_CAP", "CONFIRM_PRODUCT", "POUR", "FINISH", "RECORDED"]
+    assert record is not None
+    assert record["completion_source"] == "observed_sequence"
+    assert record["user_confirmed"] is False
 
     again = client.post(f"/sessions/{sid}/observations", json=windows(seq)).json()
     assert again["windows"][0]["reason"] == "already_recorded"
@@ -65,9 +64,38 @@ def test_happy_path_records_once_and_updates_memory():
     memory = client.get(f"/vehicles/{vid}/memory").json()
     assert len(memory) == 1
 
+    after = client.post("/briefings", json={"vehicle_id": vid}).json()
+    assert "logged today, observed by camera" in after["text"]
+
     answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "What did I do earlier?"}).json()
     assert "A washer fluid refill was logged" in answer["text"]
+    assert "observed by camera" in answer["text"]
     assert answer["fact_ids"] == [memory[0]["record_id"]]
+
+
+class UnseenPourSpark(HappyPathSpark):
+    _ANSWERS = {
+        **HappyPathSpark._ANSWERS,
+        Step.POUR: SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_visible=Tri.UNCLEAR),
+    }
+
+
+def test_touch_confirmation_records_manual_entry_and_counts_in_care():
+    client = TestClient(create_app(Settings(), spark=UnseenPourSpark()))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    seq = 1
+    for _ in range(5):
+        body = client.post(f"/sessions/{sid}/observations", json=windows(seq)).json()
+        seq += 2
+    assert body["session"]["waiting_reason"] == "NEED_VOICE_CONFIRM"
+    assert body["record"] is None
+    confirmed = client.post(f"/sessions/{sid}/voice", json={"intent": "CONFIRM_YES", "via": "touch"}).json()
+    assert confirmed["record"]["completion_source"] == "manual_entry"
+    assert confirmed["record"]["user_confirmed"] is True
+    care = client.get(f"/vehicles/{vid}/care-recommendations").json()
+    washer = next(item for item in care["recommendations"] if item["component"] == "washer_fluid")
+    assert washer["priority"] == "ROUTINE"
 
 
 def test_unsupported_vehicle_is_rejected():

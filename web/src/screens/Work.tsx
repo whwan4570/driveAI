@@ -170,10 +170,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     }
   };
 
-  const sendIntent = async (sessionId: string, intent: VoiceIntent) => {
+  const sendIntent = async (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") => {
     try {
       controllerRef.current?.invalidateInFlight();
-      const update = await api.voice(sessionId, intent);
+      const update = await api.voice(sessionId, intent, via);
       setSession(update.session);
       controllerRef.current?.setPaused(update.session.paused);
       if (intent === "RESTART") controllerRef.current?.start();
@@ -245,6 +245,6 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
     {!session ? visionStatus === "billing_required" || visionStatus === "unauthorized" ? <div className="guide-blocked"><p>To continue safely, use your vehicle manual to identify the cap and verify the product label. You can save a completed refill from History.</p><button type="button" className="primary action-button work-start" onClick={onDone}>Back to my car<Icon name="arrow" size={18}/></button></div> : <button type="button" className="primary action-button work-start" onClick={() => void start()} disabled={starting}>{starting ? "Starting…" : "Start guide"}<Icon name="arrow" size={18}/></button>
       : done ? <button type="button" className="primary action-button work-start" onClick={onDone}>Back to my car<Icon name="arrow" size={18}/></button>
-      : <><div className="work-footer"><div className="work-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Ask a question or say ‘repeat that’" : "Voice questions are unavailable. Camera guidance continues."}</span></div><button type="button" className="pause-button" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE")} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button></div>{waiting === "NEED_VOICE_CONFIRM" && <div className="completion-confirm"><button type="button" className="primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES")}>Yes, I completed the refill</button><button type="button" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO")}>Not yet</button></div>}</>}
+      : <><div className="work-footer"><div className="work-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Ask a question or say ‘repeat that’" : "Voice questions are unavailable. Camera guidance continues."}</span></div><button type="button" className="pause-button" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE", "touch")} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button></div>{waiting === "NEED_VOICE_CONFIRM" && <div className="completion-confirm"><button type="button" className="primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, I completed the refill</button><button type="button" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button></div>}</>}
   </main></div>;
 }

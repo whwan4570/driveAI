@@ -148,7 +148,9 @@ def transition(
     return _advance(state, verdict.key, frames, obs, now)
 
 
-def apply_voice(state: SessionState, intent: VoiceIntent, *, now: datetime) -> TransitionResult:
+def apply_voice(
+    state: SessionState, intent: VoiceIntent, *, now: datetime, via: Literal["voice", "touch"] = "voice"
+) -> TransitionResult:
     if intent is VoiceIntent.PAUSE:
         return _result(state.model_copy(update={"paused": True, "pending": None}), "paused", "paused")
 
@@ -175,7 +177,9 @@ def apply_voice(state: SessionState, intent: VoiceIntent, *, now: datetime) -> T
     waiting_for_voice = state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
     if intent is VoiceIntent.CONFIRM_YES:
         if waiting_for_voice:
-            return _complete(state, CompletionSource.USER_VOICE_CONFIRMED, now)
+            # 화면 확인 버튼은 음성 확인과 출처를 나눠 저장한다.
+            source = CompletionSource.MANUAL_ENTRY if via == "touch" else CompletionSource.USER_VOICE_CONFIRMED
+            return _complete(state, source, now)
         if state.waiting_reason is not None:
             return _result(state, "voice_cannot_approve", "voice_cannot_approve", force=True, accepted=False)
         return _reject(state, "nothing_to_confirm")
@@ -287,14 +291,20 @@ def _advance(
         )
         return _result(state, "pour_not_observed", "confirm_pour")
     if step is Step.FINISH:
-        state = state.model_copy(update={"waiting_reason": WaitReason.NEED_VOICE_CONFIRM})
-        return _result(state, "awaiting_completion_confirmation", "confirm_completion")
+        return _complete(state, CompletionSource.OBSERVED_SEQUENCE, now)
 
     raise ValueError(f"cannot advance from {step} with {key}")
 
 
 def _goto(state: SessionState, step: Step, reason: str) -> TransitionResult:
     return _result(state.model_copy(update={"step": step}), reason, STEP_ENTRY_HINT[step])
+
+
+RECORDED_HINT: dict[CompletionSource, str] = {
+    CompletionSource.OBSERVED_SEQUENCE: "recorded_observed",
+    CompletionSource.USER_VOICE_CONFIRMED: "recorded_voice",
+    CompletionSource.MANUAL_ENTRY: "recorded_manual",
+}
 
 
 def _complete(state: SessionState, source: CompletionSource, now: datetime) -> TransitionResult:
@@ -311,8 +321,7 @@ def _complete(state: SessionState, source: CompletionSource, now: datetime) -> T
     state = state.model_copy(
         update={"step": Step.RECORDED, "waiting_reason": None, "pending": None}
     )
-    hint = "recorded_observed" if source is CompletionSource.OBSERVED_SEQUENCE else "recorded_voice"
-    result = _result(state, f"recorded:{source.value}", hint)
+    result = _result(state, f"recorded:{source.value}", RECORDED_HINT[source])
     return TransitionResult(
         state=result.state,
         accepted=True,
