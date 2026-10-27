@@ -1,0 +1,19 @@
+.DS_Store
+.env
+.env.local
+
+# backend
+backend/.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# web
+web/node_modules/
+web/dist/
+web/public/vad/
+*.tsbuildinfo
+
+# 실차 원본 영상·프레임은 저장소에 올리지 않는다 (클립 JSON만 커밋)
+recordings/
+fixtures/frames/

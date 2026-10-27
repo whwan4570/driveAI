@@ -1,0 +1,16 @@
+{
+  "name": "overlapping_frames",
+  "description": "같은 프레임을 공유한 두 묶음은 독립 확인으로 세지 않음",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "OPEN_CAP",
+    "completion_source": null,
+    "waiting_reason": null
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 6.0, "seq": 3, "frames": ["g1", "g2"], "answer": {"cap_state": "open"}},
+    {"t": 7.0, "seq": 4, "frames": ["g2", "g3"], "answer": {"cap_state": "open"}}
+  ]
+}

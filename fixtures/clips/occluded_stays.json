@@ -1,0 +1,18 @@
+{
+  "name": "occluded_stays",
+  "description": "계속 가려진 채 → 시간이 지나도 넘어가지 않음",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "OPEN_CAP",
+    "completion_source": null,
+    "waiting_reason": "OCCLUDED"
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 5.0, "seq": 3, "frames": ["f005", "f006"], "answer": {"occluded": true, "cap_state": "occluded"}},
+    {"t": 10.0, "seq": 4, "frames": ["f007", "f008"], "answer": {"occluded": true, "cap_state": "occluded"}},
+    {"t": 15.0, "seq": 5, "frames": ["f009", "f010"], "answer": {"occluded": true, "cap_state": "occluded"}},
+    {"t": 20.0, "seq": 6, "frames": ["f011", "f012"], "answer": {"occluded": true, "cap_state": "occluded"}}
+  ]
+}

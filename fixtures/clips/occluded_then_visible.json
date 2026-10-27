@@ -1,0 +1,18 @@
+{
+  "name": "occluded_then_visible",
+  "description": "캡 열림 사이에 손 가림 → 연속 판단이 끊겨 대기, 다시 두 번 보인 뒤 전환",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "CONFIRM_PRODUCT",
+    "completion_source": null,
+    "waiting_reason": null
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 6.0, "seq": 3, "frames": ["f005", "f006"], "answer": {"cap_state": "open"}},
+    {"t": 7.0, "seq": 4, "frames": ["f007", "f008"], "answer": {"occluded": true, "cap_state": "occluded"}},
+    {"t": 8.0, "seq": 5, "frames": ["f009", "f010"], "answer": {"cap_state": "open"}},
+    {"t": 9.0, "seq": 6, "frames": ["f011", "f012"], "answer": {"cap_state": "open"}}
+  ]
+}

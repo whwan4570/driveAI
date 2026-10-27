@@ -1,0 +1,17 @@
+{
+  "name": "stale_and_reordered",
+  "description": "역순 응답과 오래된 프레임 응답은 버림",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "OPEN_CAP",
+    "completion_source": null,
+    "waiting_reason": null
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 6.0, "seq": 4, "frames": ["f005", "f006"], "answer": {"cap_state": "open"}},
+    {"t": 6.5, "seq": 3, "frames": ["f007", "f008"], "answer": {"cap_state": "open"}},
+    {"t": 7.5, "seq": 5, "frames": ["f009", "f010"], "answer": {"cap_state": "open"}, "arrives": 30.0}
+  ]
+}

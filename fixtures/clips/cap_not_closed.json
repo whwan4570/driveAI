@@ -1,0 +1,23 @@
+{
+  "name": "cap_not_closed",
+  "description": "붓기 후 병은 세웠지만 캡이 열린 채 → 기록하지 않음",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "FINISH",
+    "completion_source": null,
+    "waiting_reason": null
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 6.0, "seq": 3, "frames": ["f005", "f006"], "answer": {"cap_state": "open"}},
+    {"t": 7.0, "seq": 4, "frames": ["f007", "f008"], "answer": {"cap_state": "open"}},
+    {"t": 10.0, "seq": 5, "frames": ["f009", "f010"], "answer": {"label_text": "사계절 워셔액", "product_class": "washer_fluid"}},
+    {"t": 11.0, "seq": 6, "frames": ["f011", "f012"], "answer": {"label_text": "사계절 워셔액", "product_class": "washer_fluid"}},
+    {"t": 14.0, "seq": 7, "frames": ["f013", "f014"], "answer": {"bottle_over_inlet": "yes", "bottle_tilted": "yes", "flow_visible": "yes"}},
+    {"t": 15.0, "seq": 8, "frames": ["f015", "f016"], "answer": {"bottle_over_inlet": "yes", "bottle_tilted": "yes", "flow_visible": "yes"}},
+    {"t": 23.0, "seq": 9, "frames": ["f017", "f018"], "answer": {"cap_state": "open", "bottle_upright": "yes"}},
+    {"t": 24.0, "seq": 10, "frames": ["f019", "f020"], "answer": {"cap_state": "open", "bottle_upright": "yes"}},
+    {"t": 25.0, "seq": 11, "frames": ["f021", "f022"], "answer": {"cap_state": "open", "bottle_upright": "yes"}}
+  ]
+}

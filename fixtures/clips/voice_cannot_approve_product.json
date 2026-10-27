@@ -1,0 +1,19 @@
+{
+  "name": "voice_cannot_approve_product",
+  "description": "라벨을 못 읽는 상태에서 '맞아'라고 해도 승인하지 않음",
+  "source": "synthetic",
+  "expect": {
+    "final_step": "CONFIRM_PRODUCT",
+    "completion_source": null,
+    "waiting_reason": "PRODUCT_UNKNOWN"
+  },
+  "events": [
+    {"t": 1.0, "seq": 1, "frames": ["f001", "f002"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 2.0, "seq": 2, "frames": ["f003", "f004"], "answer": {"inlet_visible": "yes", "inlet_symbol_ok": "yes", "cap_state": "closed"}},
+    {"t": 6.0, "seq": 3, "frames": ["f005", "f006"], "answer": {"cap_state": "open"}},
+    {"t": 7.0, "seq": 4, "frames": ["f007", "f008"], "answer": {"cap_state": "open"}},
+    {"t": 10.0, "seq": 5, "frames": ["f009", "f010"], "answer": {"product_class": "unreadable"}},
+    {"t": 11.0, "seq": 6, "frames": ["f011", "f012"], "answer": {"product_class": "unreadable"}},
+    {"t": 13.0, "voice": "CONFIRM_YES"}
+  ]
+}
