@@ -247,7 +247,7 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
     finished = a.cap_state is CapState.CLOSED and a.bottle_upright is Tri.YES
 
     if step is Step.POUR:
-        if a.label_text and evaluate_product(a.label_text, a.product_class, spec) is not ProductVerdict.MATCH:
+        if _bottle_changed(state, a, spec):
             return _Verdict("regress", "bottle_changed")
         if finished:
             # 붓는 모습은 못 봤지만 마무리는 보였다. 기록 전에 음성으로 확인한다.
@@ -263,7 +263,7 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
         return _Verdict("not_yet", "pour")
 
     if step is Step.FINISH:
-        if a.label_text and evaluate_product(a.label_text, a.product_class, spec) is not ProductVerdict.MATCH:
+        if _bottle_changed(state, a, spec):
             return _Verdict("regress", "bottle_changed")
         if finished:
             return _Verdict("satisfied", key="finished", flow_seen=flow_seen)
@@ -272,6 +272,22 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
         return _Verdict("not_yet", "finish", flow_seen=flow_seen)
 
     raise ValueError(f"no rule for step {step}")
+
+
+def _bottle_changed(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> bool:
+    """붓기·마무리 중 병이 바뀌었는지 본다.
+
+    금지 제품(CONFLICT)이거나, 온전히 읽힌 워셔액 라벨이 확인한 라벨과 다를 때만 바뀐 것으로 본다.
+    기울어져 일부만 읽힌 라벨(UNKNOWN)이나 같은 라벨의 일부는 그대로 진행한다.
+    """
+    verdict = evaluate_product(a.label_text, a.product_class, spec)
+    if verdict is ProductVerdict.CONFLICT:
+        return True
+    if verdict is not ProductVerdict.MATCH or not state.confirmed_product:
+        return False
+    seen = normalize_label(a.label_text or "")
+    confirmed = normalize_label(state.confirmed_product)
+    return seen not in confirmed and confirmed not in seen
 
 
 def _advance(

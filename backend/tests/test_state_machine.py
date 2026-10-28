@@ -292,6 +292,50 @@ def test_bottle_swap_during_pour_goes_back_to_product_check():
     assert d.state.confirmed_product is None
 
 
+@pytest.mark.parametrize(
+    ("label", "product_class"),
+    [
+        ("WASH", ProductClass.UNREADABLE),       # 기울어져 일부만 읽힘 → UNKNOWN
+        ("사계절", ProductClass.WASHER_FLUID),   # 워셔액 용어가 안 보임 → UNKNOWN
+        ("워셔액", ProductClass.WASHER_FLUID),   # 확인한 라벨의 일부 → 같은 병
+    ],
+)
+def test_partial_or_same_label_during_pour_keeps_progress(label, product_class):
+    d = at_pour()
+    seen = POUR_FLOW.model_copy(update={"label_text": label, "product_class": product_class})
+    assert d.obs(seen).reason == "awaiting_agreement"
+    d.obs(seen)
+    assert d.state.step is Step.FINISH
+    assert d.state.confirmed_product == "사계절 워셔액"
+
+
+def test_different_washer_label_during_pour_rechecks_product():
+    d = at_pour()
+    r = d.obs(POUR_FLOW.model_copy(update={"label_text": "Rain-X Washer Fluid", "product_class": ProductClass.WASHER_FLUID}))
+    assert r.reason == "bottle_changed"
+    assert d.state.step is Step.CONFIRM_PRODUCT
+    assert d.state.waiting_reason is WaitReason.PRODUCT_CONFLICT
+
+
+def test_finish_regresses_only_on_conflict():
+    d = at_pour()
+    d.obs(POUR_FLOW)
+    d.obs(POUR_FLOW)
+    assert d.state.step is Step.FINISH
+    unknown = DONE.model_copy(update={"label_text": "WASH", "product_class": ProductClass.UNREADABLE})
+    d.obs(unknown)
+    r = d.obs(unknown)
+    assert d.state.step is Step.RECORDED
+    assert r.completion.completion_source is CompletionSource.OBSERVED_SEQUENCE
+
+    d = at_pour()
+    d.obs(POUR_FLOW)
+    d.obs(POUR_FLOW)
+    r = d.obs(DONE.model_copy(update={"label_text": "엔진 냉각수", "product_class": ProductClass.COOLANT}))
+    assert r.reason == "bottle_changed"
+    assert d.state.step is Step.CONFIRM_PRODUCT
+
+
 def test_pause_blocks_observations_until_resume():
     d = at_open_cap()
     d.voice(VoiceIntent.PAUSE)
