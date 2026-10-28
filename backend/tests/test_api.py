@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -96,6 +96,30 @@ def test_touch_confirmation_records_manual_entry_and_counts_in_care():
     care = client.get(f"/vehicles/{vid}/care-recommendations").json()
     washer = next(item for item in care["recommendations"] if item["component"] == "washer_fluid")
     assert washer["priority"] == "ROUTINE"
+
+
+def test_slow_model_response_is_not_treated_as_stale(monkeypatch):
+    import carmori.main as main_module
+
+    clock = {"now": datetime.now(timezone.utc)}
+    monkeypatch.setattr(main_module, "utcnow", lambda: clock["now"])
+
+    class SlowSpark(HappyPathSpark):
+        async def analyze(self, frames, step, reference=None):
+            # 실측한 Meta 관찰 응답(약 9초)만큼 서버 시계를 앞당긴다.
+            clock["now"] += timedelta(seconds=9.2)
+            return await super().analyze(frames, step, reference)
+
+    client = TestClient(create_app(Settings(), spark=SlowSpark()))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    captured = clock["now"].isoformat()
+    body = client.post(f"/sessions/{sid}/observations", json={"windows": [
+        {"sequence_id": i, "frames": [{"frame_id": f"s{i}", "captured_at": captured, "jpeg_base64": JPEG}]}
+        for i in (1, 2)
+    ]}).json()
+    assert [w["reason"] for w in body["windows"]] != ["stale_frames", "stale_frames"]
+    assert body["session"]["step"] == "OPEN_CAP"
 
 
 def test_unsupported_vehicle_is_rejected():

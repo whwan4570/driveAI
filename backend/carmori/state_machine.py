@@ -90,7 +90,8 @@ def transition(
         return _reject(state, "session_mismatch")
     if obs.sequence_id <= state.last_sequence_id:
         return _reject(state, "out_of_order")
-    if now - obs.captured_at > rules.max_frame_age:
+    # 늦게 도착한 응답은 순서·단계·시도 검사로 버리고, 신선도는 요청이 도착한 시점의 프레임 나이로 본다.
+    if (obs.received_at or now) - obs.captured_at > rules.max_frame_age:
         return _reject(state, "stale_frames")
     if obs.attempt != state.attempt or obs.step is not state.step:
         return _reject(state, "step_mismatch")

@@ -111,6 +111,19 @@ def test_occlusion_breaks_the_consecutive_run():
     assert d.state.step is Step.OPEN_CAP
 
 
+def test_frame_age_is_measured_on_arrival_not_after_slow_model():
+    d = at_open_cap()
+    obs = Observation(
+        session_id="s1", sequence_id=50, step=Step.OPEN_CAP, attempt=1,
+        captured_at=T0, received_at=T0 + timedelta(seconds=1), frame_ids=["slow1"], answer=OPEN,
+    )
+    # 모델이 9초 걸려 처리 시각이 10초 뒤여도, 도착 시점 기준으로 신선하면 받는다.
+    r = transition(d.state, obs, now=T0 + timedelta(seconds=10), spec=DEMO_SPEC)
+    assert r.accepted and r.reason == "awaiting_agreement"
+    late = obs.model_copy(update={"sequence_id": 51, "received_at": T0 + timedelta(seconds=7)})
+    assert transition(r.state, late, now=T0 + timedelta(seconds=8), spec=DEMO_SPEC).reason == "stale_frames"
+
+
 def test_out_of_order_and_stale_and_step_mismatch_are_rejected():
     d = at_open_cap()
     d.obs(OPEN, seq=10)

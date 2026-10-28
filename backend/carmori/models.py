@@ -91,6 +91,9 @@ class Observation(BaseModel):
     step: Step
     attempt: int
     captured_at: datetime
+    # 서버가 요청을 받은 시각. 프레임 신선도는 이 시각으로 판단해 모델 응답 시간을 빼고 본다.
+    # 없으면 처리 시각(now)을 쓴다.
+    received_at: datetime | None = None
     frame_ids: list[str]
     answer: SceneAnswer
     model_version: str = "unknown"

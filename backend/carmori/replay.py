@@ -34,7 +34,7 @@ class ClipEvent(BaseModel):
     answer: SceneAnswer | None = None
     voice: VoiceIntent | None = None
     via: Literal["voice", "touch"] = "voice"
-    # 서버가 이 관찰을 처리한 시각(초). 없으면 t + latency.
+    # 요청이 서버에 도착한 시각(초). 없으면 t + upload. 처리 시각은 도착 + latency.
     arrives: float | None = None
 
 
@@ -73,7 +73,9 @@ def load_clip(path: Path) -> Clip:
     return Clip.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
-def run_clip(clip: Clip, *, rules: Rules = DEFAULT_RULES, latency_s: float = 2.5) -> ReplayReport:
+def run_clip(
+    clip: Clip, *, rules: Rules = DEFAULT_RULES, latency_s: float = 2.5, upload_s: float = 0.5
+) -> ReplayReport:
     spec: VehicleSpec | None = get_spec(clip.spec_id)
     if spec is None:
         raise ValueError(f"{clip.name}: unknown spec_id {clip.spec_id}")
@@ -81,10 +83,12 @@ def run_clip(clip: Clip, *, rules: Rules = DEFAULT_RULES, latency_s: float = 2.5
     report = ReplayReport(clip=clip, final_step=state.step, waiting_reason=None)
 
     for event in clip.events:
-        now = EPOCH + timedelta(seconds=event.arrives if event.arrives is not None else event.t + latency_s)
+        received_at = EPOCH + timedelta(seconds=event.arrives if event.arrives is not None else event.t + upload_s)
+        # 모델을 거치는 관찰만 응답 지연을 더한다. 음성 명령은 도착 즉시 처리한다.
+        now = received_at + timedelta(seconds=latency_s)
         before = state.step
         if event.voice is not None:
-            result = apply_voice(state, event.voice, now=now, via=event.via)
+            result = apply_voice(state, event.voice, now=received_at, via=event.via)
         elif event.answer is not None and event.seq is not None:
             obs = Observation(
                 session_id=state.session_id,
@@ -92,6 +96,7 @@ def run_clip(clip: Clip, *, rules: Rules = DEFAULT_RULES, latency_s: float = 2.5
                 step=state.step,
                 attempt=state.attempt,
                 captured_at=EPOCH + timedelta(seconds=event.t),
+                received_at=received_at,
                 frame_ids=event.frames,
                 answer=event.answer,
                 model_version="replay",
@@ -146,13 +151,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Replay clip fixtures through the state machine")
     parser.add_argument("targets", nargs="+", help="clip JSON files or directories")
     parser.add_argument("--latency", type=float, default=2.5, help="simulated model latency (s)")
+    parser.add_argument("--upload", type=float, default=0.5, help="simulated capture-to-server delay (s)")
     parser.add_argument("--agreements", type=int, default=DEFAULT_RULES.required_agreements)
     parser.add_argument("--max-age", type=float, default=DEFAULT_RULES.max_frame_age.total_seconds())
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
     rules = Rules(max_frame_age=timedelta(seconds=args.max_age), required_agreements=args.agreements)
-    reports = [run_clip(load_clip(p), rules=rules, latency_s=args.latency) for p in _clip_paths(args.targets)]
+    reports = [run_clip(load_clip(p), rules=rules, latency_s=args.latency, upload_s=args.upload) for p in _clip_paths(args.targets)]
 
     for r in reports:
         mark = "PASS" if r.passed else "FAIL"

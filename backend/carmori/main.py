@@ -519,6 +519,7 @@ def create_app(
 
     @app.post("/sessions/{session_id}/observations")
     async def post_observations(session_id: str, body: ObservationsIn) -> SessionUpdate:
+        received_at = utcnow()
         snapshot = session_or_404(session_id)
         _, spec = vehicle_or_404(snapshot.vehicle_id)
         reference = reference_frames.get(session_id)
@@ -559,6 +560,7 @@ def create_app(
                     step=snapshot.step,
                     attempt=snapshot.attempt,
                     captured_at=window.frames[-1].captured_at,
+                    received_at=received_at,
                     frame_ids=[f.frame_id for f in window.frames],
                     answer=answer,
                     model_version=spark.model_version,
