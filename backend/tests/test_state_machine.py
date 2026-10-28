@@ -18,7 +18,9 @@ from carmori.models import (
 )
 from carmori.prompts import parse_scene_answer
 from carmori.state_machine import apply_voice, completion_event_id, new_session, transition
+from carmori.step_fsm import next_step
 from carmori.vehicles import DEMO_SPEC
+from transitions import MachineError
 
 T0 = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
 
@@ -82,6 +84,23 @@ def test_two_disjoint_windows_advance_and_speak_next_hint():
     r = d.obs(INLET)
     assert d.state.step is Step.OPEN_CAP
     assert r.spoken_hint == "Open the cap I marked."
+
+
+def test_transitions_graph_rejects_unseen_step_skip():
+    with pytest.raises(MachineError):
+        next_step(Step.FIND_INLET, "product_matched")
+
+
+def test_reused_evidence_and_voice_version_invalidate_old_observations():
+    d = at_open_cap()
+    previous = d.state.state_version
+    paused = d.voice(VoiceIntent.PAUSE)
+    resumed = d.voice(VoiceIntent.RESUME)
+    assert paused.state.state_version == previous + 1
+    assert resumed.state.state_version == previous + 2
+    reused = d.obs(OPEN, frames=["f1a", "new-frame"])
+    assert reused.reason == "reused_frames"
+    assert d.state.step is Step.OPEN_CAP
 
 
 def test_overlapping_frames_are_not_independent_confirmation():

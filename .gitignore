@@ -4,6 +4,7 @@
 
 # backend
 backend/.venv/
+voice-service/.venv/
 backend/data/
 __pycache__/
 *.egg-info/
@@ -18,3 +19,5 @@ web/public/vad/
 # 실차 원본 영상·프레임은 저장소에 올리지 않는다 (클립 JSON만 커밋)
 recordings/
 fixtures/frames/
+
+web/public/mediapipe/wasm/

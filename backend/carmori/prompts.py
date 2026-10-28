@@ -14,18 +14,19 @@ from pydantic import ValidationError
 
 from .models import SceneAnswer, Step
 
+# 짧을수록 응답이 빠르다. 값 목록은 SceneAnswer와 맞춘다.
 FIELD_GUIDE: dict[str, str] = {
-    "occluded": "true if hands or objects block the washer inlet area so the key state cannot be judged",
-    "inlet_visible": "yes|no|unclear — the washer fluid inlet cap is in view",
-    "inlet_symbol_ok": "yes|no|unclear — the cap shows the windshield-washer symbol",
-    "cap_state": "closed|open|occluded|not_visible — compare with the reference frame if given",
-    "hand_near_cap": "yes|no|unclear — a hand is touching or next to the cap",
-    "label_text": "exact readable text on the product label, or null",
-    "product_class": "washer_fluid|coolant|oil|other|unreadable — judged from the label only",
-    "bottle_over_inlet": "yes|no|unclear — the bottle mouth is above the open inlet",
-    "bottle_tilted": "yes|no|unclear — the bottle is tilted for pouring",
-    "flow_visible": "yes|no|unclear — liquid is visibly flowing from the bottle into the inlet",
-    "bottle_upright": "yes|no|unclear — the bottle is set upright away from the inlet",
+    "occluded": "true|false: something blocks the inlet so its state can't be judged",
+    "inlet_visible": "yes|no|unclear: washer inlet cap in view",
+    "inlet_symbol_ok": "yes|no|unclear: cap shows the windshield-washer symbol",
+    "cap_state": "closed|open|occluded|not_visible",
+    "hand_near_cap": "yes|no|unclear: hand touching or next to the cap",
+    "label_text": "exact readable label text, or null",
+    "product_class": "washer_fluid|coolant|oil|other|unreadable: from the label only",
+    "bottle_over_inlet": "yes|no|unclear: bottle mouth above the open inlet",
+    "bottle_tilted": "yes|no|unclear: bottle tilted to pour",
+    "flow_visible": "yes|no|unclear: liquid visibly flowing into the inlet",
+    "bottle_upright": "yes|no|unclear: bottle set upright away from the inlet",
 }
 
 STEP_FIELDS: dict[Step, tuple[str, ...]] = {
@@ -61,19 +62,13 @@ def fields_for(step: Step | None) -> tuple[str, ...]:
 
 def build_scene_prompt(step: Step | None, *, has_reference: bool) -> str:
     fields = fields_for(step)
-    lines = [
-        "You are watching a fixed phone camera next to a car engine bay while a person refills washer fluid.",
-        "The images are consecutive frames in time order.",
-    ]
-    if has_reference:
-        lines.append("The first image is a reference frame from the previous confirmed step.")
-    lines += [
-        "Answer only what is directly visible. If you cannot see it, answer unclear.",
-        "Do not infer fluid level, amount poured, or whether the car is fine.",
-        "Return one JSON object with exactly these keys:",
-        *(f'- "{name}": {FIELD_GUIDE[name]}' for name in fields),
-    ]
-    return "\n".join(lines)
+    reference = " Image 1 is the last confirmed step; compare cap_state with it." if has_reference else ""
+    return "\n".join([
+        f"Fixed camera at a car engine bay during a washer fluid refill. Frames are in time order.{reference}",
+        "Report only what is visible; use unclear when unsure.",
+        "Reply with only one JSON object, no other text, with these keys:",
+        *(f"{name}: {FIELD_GUIDE[name]}" for name in fields),
+    ])
 
 
 def parse_scene_answer(raw: str, allowed: Iterable[str] = ALL_FIELDS) -> SceneAnswer:

@@ -34,6 +34,11 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const [selected, setSelected] = useState<Concern | null>(null);
   const [modelReady, setModelReady] = useState(false);
+  const [modelFailed, setModelFailed] = useState(false);
+  const customModel = vehicle?.model_3d_status === "ready" && !!vehicle.model_3d_url && !modelFailed;
+  const modelSrc = customModel
+    ? `/api${vehicle.model_3d_url}?v=${encodeURIComponent(vehicle.model_3d_updated_at || "ready")}`
+    : "/models/modern-sedan.glb";
   const concerns = useMemo<Concern[]>(() => (care?.recommendations ?? []).flatMap((item) => {
     const severity = concernSeverity(item.priority);
     return severity ? [{ component: item.component, severity, item }] : [];
@@ -44,15 +49,22 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
+    setModelReady(false);
     const updatePaint = () => {
-      const body = viewer.model?.materials.find((material) => material.name === "paint");
-      body?.pbrMetallicRoughness.setBaseColorFactor(paintColor(vehicle?.exterior_color));
+      if (!customModel) {
+        const body = viewer.model?.materials.find((material) => material.name === "paint");
+        body?.pbrMetallicRoughness.setBaseColorFactor(paintColor(vehicle?.exterior_color));
+      }
       setModelReady(true);
     };
+    const onError = () => { if (customModel) setModelFailed(true); };
     viewer.addEventListener("load", updatePaint);
-    if (viewer.model) updatePaint();
-    return () => viewer.removeEventListener("load", updatePaint);
-  }, [vehicle?.exterior_color]);
+    viewer.addEventListener("error", onError);
+    if (viewer.model && viewer.getAttribute("src") === modelSrc) updatePaint();
+    return () => { viewer.removeEventListener("load", updatePaint); viewer.removeEventListener("error", onError); };
+  }, [vehicle?.exterior_color, customModel, modelSrc]);
+
+  useEffect(() => { setModelFailed(false); }, [vehicle?.vehicle_id, vehicle?.model_3d_updated_at]);
 
   const viewDetails = (component: Concern["component"]) => {
     setSelected(null);
@@ -79,8 +91,8 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
       {createElement("model-viewer", {
         ref: viewerRef,
         className: "status-model-viewer",
-        src: "/models/modern-sedan.glb",
-        alt: `Rotatable 3D illustration in ${vehicle?.exterior_color || "silver"}`,
+        src: modelSrc,
+        alt: customModel ? `Rotatable 3D model of ${vehicle?.year} ${vehicle?.make} ${vehicle?.model}` : `Rotatable 3D illustration in ${vehicle?.exterior_color || "silver"}`,
         "camera-controls": "",
         "camera-orbit": "35deg 72deg 6.5m",
         "camera-target": "0m 0.72m 0m",
@@ -89,7 +101,8 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
         "shadow-intensity": "1",
         exposure: "1.15",
         "touch-action": "pan-y",
-      }, ...hotspots)}
+      }, ...(customModel ? [] : hotspots))}
+      {customModel && concerns.length > 0 && <div className="status-model-issues" aria-label="Areas to review">{concerns.map((concern) => <button key={concern.component} type="button" className={concern.severity} onClick={() => setSelected(concern)}>{concern.item.title}</button>)}</div>}
       {!modelReady && <span className="status-model-loading">Loading 3D view…</span>}
     </div>
     {selected && <div className={`status-concern-popover ${selected.severity}`} role="region" aria-label={`${selected.item.title} summary`}>
@@ -99,6 +112,6 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
       <p>{selected.item.explanation}</p>
       <button className="status-concern-more" type="button" onClick={() => viewDetails(selected.component)}>View details <span aria-hidden="true">↓</span></button>
     </div>}
-    <p className="status-3d-disclaimer">Illustrative 3D sedan · Status comes from saved records, not live car sensors.</p>
+    <p className="status-3d-disclaimer">{customModel ? "Vehicle-specific 3D file ·" : "Illustrative 3D sedan ·"} Status comes from saved records, not live car sensors.</p>
   </section>;
 }

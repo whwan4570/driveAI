@@ -15,6 +15,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      "/pipecat": {
+        target: process.env.CARMORI_PIPECAT ?? "http://127.0.0.1:7860",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pipecat/, ""),
+      },
     },
   },
   optimizeDeps: { exclude: ["onnxruntime-web"] },

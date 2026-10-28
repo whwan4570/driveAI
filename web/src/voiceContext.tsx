@@ -22,7 +22,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         console.warn("transcribe failed", error);
       }
-    });
+    }, (text) => handlerRef.current?.(text));
     valueRef.current = { voice, setHandler: (h) => (handlerRef.current = h) };
   }
   return <VoiceContext.Provider value={valueRef.current}>{children}</VoiceContext.Provider>;

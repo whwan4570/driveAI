@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 import base64
 import json
+import logging
+import time
 from typing import Protocol
 
 import httpx
@@ -14,6 +16,8 @@ from .briefing import Fact
 from .config import Settings
 from .models import CapState, ProductClass, SceneAnswer, Step, Tri
 from .prompts import build_scene_prompt, fields_for, parse_scene_answer
+
+log = logging.getLogger("carmori.spark")
 
 
 class AssistantAnswer(BaseModel):
@@ -45,7 +49,7 @@ class MetaSparkClient:
     ) -> SceneAnswer:
         prompt = build_scene_prompt(step, has_reference=reference is not None)
         images = [reference, *frames] if reference is not None else list(frames)
-        raw = await self._vision_request(prompt, images)
+        raw = await self._vision_request(prompt, images, reasoning_effort=self.settings.spark_reasoning_effort or None)
         return parse_scene_answer(raw, fields_for(step))
 
     async def transcribe(self, wav: bytes) -> str:
@@ -79,23 +83,37 @@ class MetaSparkClient:
         except (ValueError, TypeError):
             return AssistantAnswer(text="I cannot answer that from your saved records.", fact_ids=[])
 
-    async def _vision_request(self, prompt: str, images: Sequence[bytes]) -> str:
+    async def _vision_request(self, prompt: str, images: Sequence[bytes], *, reasoning_effort: str | None = None) -> str:
         content = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(img).decode('ascii')}"}} for img in images)
-        return await self._request(content)
+        return await self._request(content, reasoning_effort=reasoning_effort)
 
-    async def _request(self, content: list[dict]) -> str:
+    async def _request(self, content: list[dict], *, reasoning_effort: str | None = None) -> str:
         if not self.settings.meta_api_key:
             raise RuntimeError("Meta API key missing")
         base = self.settings.meta_api_base_url.rstrip("/") or "https://api.meta.ai/v1"
+        payload: dict = {"model": self.settings.spark_vision_model, "messages": [{"role": "user", "content": content}]}
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        started = time.monotonic()
         async with httpx.AsyncClient(timeout=self.settings.spark_timeout_s) as client:
             response = await client.post(
                 f"{base}/chat/completions",
                 headers={"Authorization": f"Bearer {self.settings.meta_api_key}"},
-                json={"model": self.settings.spark_vision_model, "messages": [{"role": "user", "content": content}]},
+                json=payload,
             )
             response.raise_for_status()
-        message = response.json()["choices"][0]["message"]["content"]
+        body = response.json()
+        usage = body.get("usage") or {}
+        # Day 2 지연 측정용: 호출 시간과 추론 토큰 수를 남긴다.
+        log.info(
+            "spark %.2fs effort=%s images=%d prompt_tokens=%s completion_tokens=%s reasoning_tokens=%s",
+            time.monotonic() - started, reasoning_effort or "default",
+            sum(1 for part in content if part.get("type") == "image_url"),
+            usage.get("prompt_tokens"), usage.get("completion_tokens"),
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+        )
+        message = body["choices"][0]["message"]["content"]
         if not isinstance(message, str):
             raise ValueError("Meta returned non-text content")
         return message

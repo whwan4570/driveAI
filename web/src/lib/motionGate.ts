@@ -20,7 +20,7 @@ export const DEFAULT_MOTION_OPTIONS: MotionGateOptions = {
   idleProbeMs: 4000,
 };
 
-export type TriggerReason = "settled" | "idle";
+export type TriggerReason = "settled" | "idle" | "hand_left_roi";
 
 export class MotionGate {
   private prev: Uint8Array | null = null;

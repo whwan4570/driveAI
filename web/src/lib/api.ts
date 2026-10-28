@@ -46,6 +46,9 @@ export interface Vehicle {
   generated_image_data_url: string | null;
   image_status: "needs_color" | "pending" | "ready" | "failed";
   image_error: string | null;
+  model_3d_url: string | null;
+  model_3d_status: "unavailable" | "ready";
+  model_3d_updated_at: string | null;
   profile_source: "manual" | "scan" | "document" | "demo";
 }
 
@@ -108,6 +111,7 @@ export interface SessionView {
   vehicle_id: string;
   step: Step;
   attempt: number;
+  state_version: number;
   waiting_reason: WaitReason | null;
   paused: boolean;
 }
@@ -131,6 +135,24 @@ export interface SessionUpdate {
   transition_reason: string;
   spoken_hint: string | null;
   record: MaintenanceRecord | null;
+}
+
+export type SamTarget = "cap" | "bottle" | "inlet";
+export interface SamDetection {
+  frame_index: number;
+  track_id: string;
+  box: [number, number, number, number];
+  confidence: number | null;
+  mask_encoding: string;
+  mask_payload: string;
+  mask_width: number;
+  mask_height: number;
+}
+export interface SamVideoResult {
+  target: SamTarget;
+  model_version: "sam-3.1";
+  track_scope: "request";
+  detections: SamDetection[];
 }
 
 export interface FrameIn {
@@ -188,11 +210,15 @@ export const api = {
     post<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),
-  ask: (vehicleId: string, question: string) =>
-    post<{ text: string; fact_ids: string[] }>("/assistant/ask", { vehicle_id: vehicleId, question }),
+  ask: (vehicleId: string, question: string, sessionId?: string) =>
+    post<{ text: string; fact_ids: string[] }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
   startSession: (vehicleId: string) => post<SessionUpdate>("/sessions", { vehicle_id: vehicleId }),
-  observe: (sessionId: string, windows: WindowIn[]) =>
-    post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows }),
+  observe: (sessionId: string, windows: WindowIn[], expectedStateVersion: number) =>
+    post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows, expected_state_version: expectedStateVersion }),
+  trackClip: (sessionId: string, target: SamTarget, mp4: Blob) =>
+    call<SamVideoResult>(`/sessions/${sessionId}/tracks?target=${target}`, {
+      method: "POST", headers: { "Content-Type": "video/mp4" }, body: mp4,
+    }),
   // via=touch: 화면 버튼으로 보낸 확인은 manual_entry로 기록된다.
   voice: (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") =>
     post<SessionUpdate>(`/sessions/${sessionId}/voice`, { intent, via }),

@@ -18,6 +18,7 @@ export interface WorkSessionDeps {
   video: HTMLVideoElement;
   getRoi: () => Roi;
   sessionId: string;
+  stateVersion: number;
   onUpdate: (update: SessionUpdate, trigger: TriggerReason) => void;
   onError: (error: unknown) => void;
 }
@@ -28,9 +29,15 @@ export class WorkSessionController {
   private paused = false;
   private seq = 0;
   private epoch = 0;
+  private stateVersion: number;
   private readonly gate: MotionGate;
+  private handNearFrames = 0;
+  private handAwayFrames = 0;
+  private handWasNear = false;
+  private lastHandTriggerAt = 0;
 
   constructor(private readonly deps: WorkSessionDeps) {
+    this.stateVersion = deps.stateVersion;
     this.gate = new MotionGate((reason) => void this.onTrigger(reason));
   }
 
@@ -52,6 +59,10 @@ export class WorkSessionController {
     if (!paused) this.gate.reset(performance.now());
   }
 
+  setStateVersion(version: number) {
+    this.stateVersion = version;
+  }
+
   /** 음성 명령으로 서버 상태가 바뀌면 진행 중인 응답을 버린다. */
   invalidateInFlight() {
     this.epoch++;
@@ -59,6 +70,25 @@ export class WorkSessionController {
 
   get motion() {
     return this.gate.lastDiff;
+  }
+
+  /** 손이 작업 영역을 벗어난 뒤 다시 서버 시각 판정을 요청한다. 손 위치만으로 단계는 완료하지 않는다. */
+  updateHandNearInlet(near: boolean) {
+    if (this.paused || this.timer === null) return;
+    if (near) {
+      this.handNearFrames++;
+      this.handAwayFrames = 0;
+      if (this.handNearFrames >= 2) this.handWasNear = true;
+      return;
+    }
+    this.handNearFrames = 0;
+    if (!this.handWasNear || ++this.handAwayFrames < 2) return;
+    this.handWasNear = false;
+    this.handAwayFrames = 0;
+    const now = performance.now();
+    if (now - this.lastHandTriggerAt < 3000) return;
+    this.lastHandTriggerAt = now;
+    void this.onTrigger("hand_left_roi");
   }
 
   private tick = () => {
@@ -85,11 +115,12 @@ export class WorkSessionController {
     if (this.inFlight || this.paused) return;
     this.inFlight = true;
     const epoch = this.epoch;
+    const expectedVersion = this.stateVersion;
     try {
       const first = await this.captureWindow();
       await sleep(WINDOW_GAP_MS);
       const second = await this.captureWindow();
-      const update = await api.observe(this.deps.sessionId, [first, second]);
+      const update = await api.observe(this.deps.sessionId, [first, second], expectedVersion);
       if (epoch === this.epoch) this.deps.onUpdate(update, reason);
     } catch (error) {
       if (epoch === this.epoch) this.deps.onError(error);

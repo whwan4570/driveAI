@@ -6,18 +6,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import base64
+import json
+import tempfile
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .briefing import (
+    Fact,
     build_facts,
     is_memory_question,
     render_briefing,
@@ -39,6 +45,7 @@ from .models import (
     WaitReason,
 )
 from .spark import MetaSparkClient, SparkClient, make_spark_client
+from .sam_video import MetaSamVideoTracker, SamTarget, SamVideoResult, SamVideoTracker
 from .state_machine import TransitionResult, apply_voice, new_session, transition
 from .store import MemoryStore, SQLiteStore, Store
 from .vehicles import SUPPORTED_SPECS, VehicleSpec, get_spec
@@ -46,6 +53,15 @@ from .vehicle_recognition import DocumentMime, DocumentType, MetaVehicleRecogniz
 from .vehicle_catalog import MAKES, POPULAR_MAKES, ModelCatalog, NhtsaModelCatalog
 from .vehicle_image import MetaVehicleImageGenerator, VehicleImageError, VehicleImageGenerator
 from .weather import EnvironmentProvider, OpenMeteoEnvironment, fetch_weather
+
+
+# carmori.* 로그(Spark 호출 시간 등)를 uvicorn 출력에 함께 보인다.
+_carmori_log = logging.getLogger("carmori")
+if not _carmori_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s %(message)s"))
+    _carmori_log.addHandler(_handler)
+    _carmori_log.setLevel(logging.INFO)
 
 
 def utcnow() -> datetime:
@@ -66,6 +82,7 @@ class WindowIn(BaseModel):
 class ObservationsIn(BaseModel):
     # 겹치지 않는 묶음 1~2개. 2개면 Spark를 동시에 호출해 확인 지연을 줄인다.
     windows: list[WindowIn] = Field(min_length=1, max_length=2)
+    expected_state_version: int | None = Field(default=None, ge=0)
 
 
 class SessionView(BaseModel):
@@ -73,6 +90,7 @@ class SessionView(BaseModel):
     vehicle_id: str
     step: Step
     attempt: int
+    state_version: int
     waiting_reason: WaitReason | None
     paused: bool
 
@@ -83,6 +101,7 @@ class SessionView(BaseModel):
             vehicle_id=s.vehicle_id,
             step=s.step,
             attempt=s.attempt,
+            state_version=s.state_version,
             waiting_reason=s.waiting_reason,
             paused=s.paused,
         )
@@ -165,6 +184,7 @@ class VoiceIn(BaseModel):
 class AskIn(BaseModel):
     vehicle_id: str
     question: str
+    session_id: str | None = None
 
 
 class AskOut(BaseModel):
@@ -208,6 +228,7 @@ def create_app(
     recognizer: VehicleRecognizer | None = None,
     inspector: Inspector | None = None,
     image_generator: VehicleImageGenerator | None = None,
+    sam_tracker: SamVideoTracker | None = None,
     environment_provider: EnvironmentProvider | None = None,
     model_catalog: ModelCatalog | None = None,
 ) -> FastAPI:
@@ -217,11 +238,15 @@ def create_app(
     recognizer = recognizer or MetaVehicleRecognizer(settings)
     inspector = inspector or (MetaInspector(spark) if isinstance(spark, MetaSparkClient) else UnavailableInspector())
     image_generator = image_generator or MetaVehicleImageGenerator(settings)
+    sam_tracker = sam_tracker or MetaSamVideoTracker(settings)
     environment_provider = environment_provider or OpenMeteoEnvironment()
     model_catalog = model_catalog or NhtsaModelCatalog()
     locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
     reference_frames: dict[str, bytes] = {}
     model_access = {"status": "unverified" if settings.meta_api_key else "missing_key"}
+    # A GPU worker can publish a viewer-ready GLB here. SAM 3D's raw splat PLY is
+    # not accepted by model-viewer; conversion and alignment happen before upload.
+    model_dir = Path(settings.db_path).expanduser().parent / "vehicle-models" if settings.db_path else Path(tempfile.mkdtemp(prefix="carmori-models-"))
 
     app = FastAPI(title="Carmori")
     app.add_middleware(
@@ -366,6 +391,50 @@ def create_app(
     def get_vehicle(vehicle_id: str) -> VehicleProfile:
         return vehicle_or_404(vehicle_id)[0]
 
+    @app.put("/vehicles/{vehicle_id}/3d-model")
+    async def publish_vehicle_3d_model(vehicle_id: str, request: Request) -> VehicleProfile:
+        """Attach a validated, viewer-ready GLB produced by an external GPU pipeline."""
+        vehicle_or_404(vehicle_id)
+        max_bytes = 30 * 1024 * 1024
+        payload = bytearray()
+        async for chunk in request.stream():
+            payload.extend(chunk)
+            if len(payload) > max_bytes:
+                raise HTTPException(413, "3D model exceeds 30 MB")
+        if len(payload) < 20 or payload[:4] != b"glTF" or int.from_bytes(payload[4:8], "little") != 2 or int.from_bytes(payload[8:12], "little") != len(payload):
+            raise HTTPException(422, "expected a complete glTF 2.0 binary (.glb)")
+        json_length = int.from_bytes(payload[12:16], "little")
+        if payload[16:20] != b"JSON" or json_length < 2 or 20 + json_length > len(payload):
+            raise HTTPException(422, "GLB JSON chunk is missing")
+        try:
+            gltf = json.loads(payload[20:20 + json_length])
+        except (ValueError, UnicodeDecodeError):
+            raise HTTPException(422, "GLB JSON chunk is invalid") from None
+        if gltf.get("asset", {}).get("version") != "2.0" or not gltf.get("meshes"):
+            raise HTTPException(422, "GLB needs a glTF 2.0 mesh")
+        async with locks[f"model:{vehicle_id}"]:
+            model_dir.mkdir(parents=True, exist_ok=True)
+            destination = model_dir / f"{vehicle_id}.glb"
+            temporary = model_dir / f"{vehicle_id}.upload"
+            temporary.write_bytes(payload)
+            temporary.replace(destination)
+            current, _ = vehicle_or_404(vehicle_id)
+            updated = current.model_copy(update={
+                "model_3d_url": f"/vehicles/{vehicle_id}/3d-model",
+                "model_3d_status": "ready",
+                "model_3d_updated_at": utcnow(),
+            })
+            store.save_vehicle(updated)
+            return updated
+
+    @app.get("/vehicles/{vehicle_id}/3d-model")
+    def get_vehicle_3d_model(vehicle_id: str) -> FileResponse:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        path = model_dir / f"{vehicle_id}.glb"
+        if vehicle.model_3d_status != "ready" or not path.is_file():
+            raise HTTPException(404, "3D model not available")
+        return FileResponse(path, media_type="model/gltf-binary", filename=f"{vehicle_id}.glb")
+
     @app.patch("/vehicles/{vehicle_id}")
     def update_vehicle(vehicle_id: str, body: VehiclePatchIn, background_tasks: BackgroundTasks) -> VehicleProfile:
         vehicle, spec = vehicle_or_404(vehicle_id)
@@ -383,7 +452,8 @@ def create_app(
         updated = vehicle.model_copy(update=changes)
         if image_identity(updated) != image_identity(vehicle):
             updated = updated.model_copy(update={"generated_image_data_url": None,
-                "image_status": "pending" if can_generate(updated) else "needs_color", "image_error": None})
+                "image_status": "pending" if can_generate(updated) else "needs_color", "image_error": None,
+                "model_3d_url": None, "model_3d_status": "unavailable", "model_3d_updated_at": None})
         store.save_vehicle(updated)
         if updated.image_status == "pending" and image_identity(updated) != image_identity(vehicle):
             background_tasks.add_task(generate_vehicle_image, vehicle_id, image_identity(updated))
@@ -517,13 +587,41 @@ def create_app(
     def get_session(session_id: str) -> SessionView:
         return SessionView.of(session_or_404(session_id))
 
+    @app.post("/sessions/{session_id}/tracks", response_model=SamVideoResult)
+    async def track_work_clip(
+        session_id: str,
+        video: bytes = Body(..., media_type="video/mp4"),
+        target: SamTarget = Query(...),
+    ) -> SamVideoResult:
+        """Return SAM masks and clip-local IDs; never treat them as step evidence alone."""
+        snapshot = session_or_404(session_id)
+        if len(video) < 32 or len(video) > 6_000_000 or video[4:8] != b"ftyp":
+            raise HTTPException(422, "expected a short MP4 under 6 MB")
+        try:
+            result = await asyncio.wait_for(sam_tracker.segment(video, target), timeout=90)
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(504, "SAM video tracking timed out") from exc
+        except Exception as exc:  # noqa: BLE001 - never expose provider details or key
+            _carmori_log.warning("SAM video tracking failed: %s", type(exc).__name__)
+            raise HTTPException(502, "SAM video tracking is unavailable") from exc
+        if session_or_404(session_id).state_version != snapshot.state_version:
+            raise HTTPException(409, "session changed; discard these tracks")
+        return result
+
     @app.post("/sessions/{session_id}/observations")
     async def post_observations(session_id: str, body: ObservationsIn) -> SessionUpdate:
         received_at = utcnow()
         snapshot = session_or_404(session_id)
+        windows = sorted(body.windows, key=lambda w: w.sequence_id)
+        if body.expected_state_version is not None and body.expected_state_version != snapshot.state_version:
+            return SessionUpdate(
+                session=SessionView.of(snapshot),
+                transition_reason="superseded",
+                spoken_hint=None,
+                windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason="superseded", answer=None) for w in windows],
+            )
         _, spec = vehicle_or_404(snapshot.vehicle_id)
         reference = reference_frames.get(session_id)
-        windows = sorted(body.windows, key=lambda w: w.sequence_id)
         decoded = [[base64.b64decode(f.jpeg_base64) for f in w.frames] for w in windows]
 
         async def analyze(frames: list[bytes]) -> SceneAnswer | None:
@@ -544,6 +642,13 @@ def create_app(
 
         async with locks[session_id]:
             state = session_or_404(session_id)
+            if state.state_version != snapshot.state_version:
+                return SessionUpdate(
+                    session=SessionView.of(state),
+                    transition_reason="superseded",
+                    spoken_hint=None,
+                    windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason="superseded", answer=None) for w in windows],
+                )
             results: list[WindowResult] = []
             last_reason = "no_change"
             hint: str | None = None
@@ -629,10 +734,27 @@ def create_app(
         vehicle, spec = vehicle_or_404(body.vehicle_id)
         records = store.list_records(vehicle.vehicle_id)
         now = utcnow()
+        session = session_or_404(body.session_id) if body.session_id else None
+        if session is not None and session.vehicle_id != body.vehicle_id:
+            raise HTTPException(400, "session belongs to another vehicle")
+        question = body.question.casefold()
+        if session is not None and any(phrase in question for phrase in ("what step", "where are we", "what should i do", "what do i do next")):
+            key = session.last_hint_key or STEP_ENTRY_HINT.get(session.step)
+            return AskOut(text=hint_text(key) if key else "The task is complete.", fact_ids=["current_step"])
+        if session is not None and any(phrase in question for phrase in ("this bottle", "this product", "is this one right", "is it the right")):
+            if session.confirmed_product:
+                return AskOut(text=f"The product label {session.confirmed_product} was confirmed for this session. If you changed bottles, show the new label before pouring.", fact_ids=["confirmed_product"])
+            return AskOut(text="I have not confirmed this bottle yet. Show its label to the camera before pouring.", fact_ids=["product_unconfirmed"])
+        if session is not None and any(phrase in question for phrase in ("what did i just do", "what did we just do")) and session.step is not Step.RECORDED:
+            return AskOut(text=f"We are at {session.step.value.replace('_', ' ').lower()}. I have not recorded a completed refill yet.", fact_ids=["current_step"])
         if is_memory_question(body.question):
             text, ids = render_memory_answer(records, now)
             return AskOut(text=text, fact_ids=ids)
         facts = build_facts(vehicle, spec, records, None, now)
+        if session is not None:
+            facts.append(Fact(id="current_step", text=f"The washer fluid guide is at {session.step.value.replace('_', ' ').lower()}; {'paused' if session.paused else 'active'}.", source="current_session", as_of=now))
+            if session.confirmed_product:
+                facts.append(Fact(id="confirmed_product", text=f"The product label {session.confirmed_product} was confirmed in the current guide.", source="current_session", as_of=now))
         try:
             answer = await asyncio.wait_for(spark.answer(body.question, facts), settings.spark_timeout_s)
         except Exception:  # noqa: BLE001

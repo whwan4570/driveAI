@@ -32,6 +32,7 @@ from .models import (
     WaitReason,
 )
 from .products import ProductVerdict, evaluate_product, normalize_label
+from .step_fsm import next_pause_state, next_step
 from .vehicles import VehicleSpec
 
 
@@ -97,8 +98,13 @@ def transition(
         return _reject(state, "step_mismatch")
     if not obs.frame_ids:
         return _reject(state, "no_frames")
+    if set(obs.frame_ids) & set(state.evidence_frames):
+        return _reject(state, "reused_frames")
 
-    state = state.model_copy(update={"last_sequence_id": obs.sequence_id})
+    state = state.model_copy(update={
+        "last_sequence_id": obs.sequence_id,
+        "state_version": state.state_version + 1,
+    })
     if state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM:
         return _result(state, "awaiting_voice_confirm", None)
 
@@ -109,7 +115,7 @@ def transition(
     if verdict.kind == "regress":
         state = state.model_copy(
             update={
-                "step": Step.CONFIRM_PRODUCT,
+                "step": next_step(state.step, "bottle_changed"),
                 "pending": None,
                 "waiting_reason": WaitReason.PRODUCT_CONFLICT,
                 "confirmed_product": None,
@@ -152,11 +158,12 @@ def transition(
 def apply_voice(
     state: SessionState, intent: VoiceIntent, *, now: datetime, via: Literal["voice", "touch"] = "voice"
 ) -> TransitionResult:
+    state = state.model_copy(update={"state_version": state.state_version + 1})
     if intent is VoiceIntent.PAUSE:
-        return _result(state.model_copy(update={"paused": True, "pending": None}), "paused", "paused")
+        return _result(state.model_copy(update={"paused": next_pause_state(state.paused, "pause"), "pending": None}), "paused", "paused")
 
     if intent is VoiceIntent.RESUME:
-        return _result(state.model_copy(update={"paused": False}), "resumed", "resumed", force=True)
+        return _result(state.model_copy(update={"paused": next_pause_state(state.paused, "resume")}), "resumed", "resumed", force=True)
 
     if intent is VoiceIntent.REPEAT:
         key = state.last_hint_key or STEP_ENTRY_HINT.get(state.step)
@@ -166,7 +173,9 @@ def apply_voice(
         fresh = SessionState(
             session_id=state.session_id,
             vehicle_id=state.vehicle_id,
+            step=next_step(state.step, "restart"),
             attempt=state.attempt + 1,
+            state_version=state.state_version,
             last_sequence_id=state.last_sequence_id,
         )
         return _result(fresh, "restart", "restart", force=True)
@@ -189,7 +198,7 @@ def apply_voice(
         if waiting_for_voice:
             state = state.model_copy(
                 update={
-                    "step": Step.POUR,
+                    "step": next_step(state.step, "retry_pour"),
                     "waiting_reason": None,
                     "pending": None,
                     "pour_flow_observed": False,
@@ -254,6 +263,8 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
         return _Verdict("not_yet", "pour")
 
     if step is Step.FINISH:
+        if a.label_text and evaluate_product(a.label_text, a.product_class, spec) is not ProductVerdict.MATCH:
+            return _Verdict("regress", "bottle_changed")
         if finished:
             return _Verdict("satisfied", key="finished", flow_seen=flow_seen)
         if a.occluded or a.cap_state in (CapState.OCCLUDED, CapState.NOT_VISIBLE):
@@ -288,7 +299,8 @@ def _advance(
         step is Step.FINISH and not state.pour_flow_observed
     ):
         state = state.model_copy(
-            update={"step": Step.FINISH, "waiting_reason": WaitReason.NEED_VOICE_CONFIRM}
+            update={"step": next_step(step, "pour_unseen") if step is Step.POUR else step,
+                    "waiting_reason": WaitReason.NEED_VOICE_CONFIRM}
         )
         return _result(state, "pour_not_observed", "confirm_pour")
     if step is Step.FINISH:
@@ -298,7 +310,10 @@ def _advance(
 
 
 def _goto(state: SessionState, step: Step, reason: str) -> TransitionResult:
-    return _result(state.model_copy(update={"step": step}), reason, STEP_ENTRY_HINT[step])
+    routed = next_step(state.step, reason)
+    if routed is not step:
+        raise ValueError(f"invalid route {state.step} -> {routed}, expected {step}")
+    return _result(state.model_copy(update={"step": routed}), reason, STEP_ENTRY_HINT[step])
 
 
 RECORDED_HINT: dict[CompletionSource, str] = {
@@ -320,7 +335,7 @@ def _complete(state: SessionState, source: CompletionSource, now: datetime) -> T
         flow_observed=state.pour_flow_observed,
     )
     state = state.model_copy(
-        update={"step": Step.RECORDED, "waiting_reason": None, "pending": None}
+        update={"step": next_step(state.step, "record"), "waiting_reason": None, "pending": None}
     )
     result = _result(state, f"recorded:{source.value}", RECORDED_HINT[source])
     return TransitionResult(

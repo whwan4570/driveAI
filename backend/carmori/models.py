@@ -116,6 +116,9 @@ class SessionState(BaseModel):
     vehicle_id: str
     step: Step = Step.FIND_INLET
     attempt: int = 1
+    # Increments for each observation or voice command. Old model responses
+    # cannot alter a session after a concurrent pause, resume, or step change.
+    state_version: int = 0
     last_sequence_id: int = -1
     pending: Pending | None = None
     waiting_reason: WaitReason | None = None
@@ -162,6 +165,9 @@ class VehicleProfile(BaseModel):
     generated_image_data_url: str | None = None
     image_status: str = "needs_color"
     image_error: str | None = None
+    model_3d_url: str | None = None
+    model_3d_status: str = "unavailable"
+    model_3d_updated_at: datetime | None = None
     profile_source: str = "manual"
     created_at: datetime
 

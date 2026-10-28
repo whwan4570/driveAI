@@ -1,3 +1,5 @@
 allowBuilds:
   esbuild: true
   protobufjs: false
+minimumReleaseAgeExclude:
+  - '@mediapipe/tasks-vision@1.2.0'

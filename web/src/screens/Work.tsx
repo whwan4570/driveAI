@@ -27,12 +27,17 @@ const WAIT_MESSAGE: Record<WaitReason, string> = {
   NEED_VOICE_CONFIRM: "Did you finish the refill? Say yes to save it, or use the confirmation below.",
 };
 
+type HandPoint = { x: number; y: number };
+type HandMessage = { type: "ready" } | { type: "result"; hands: HandPoint[][] } | { type: "error"; message: string };
+const HAND_CHAINS = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [5, 9, 10, 11, 12], [9, 13, 14, 15, 16], [13, 17, 18, 19, 20], [0, 17]];
+
 export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voiceReady: boolean; onDone: () => void }) {
   const voice = useVoice();
   const videoRef = useRef<HTMLVideoElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<WorkSessionController | null>(null);
   const roiRef = useRef<Roi>(FULL_FRAME);
+  const roiSelectedRef = useRef(false);
   const [roi, setRoi] = useState<Roi>(FULL_FRAME);
   const [roiSelected, setRoiSelected] = useState(false);
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
@@ -51,6 +56,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const productInputRef = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
   const [lastHint, setLastHint] = useState<string | null>(null);
+  const [hands, setHands] = useState<HandPoint[][]>([]);
+  const [handTracking, setHandTracking] = useState<"loading" | "ready" | "unavailable">("loading");
   const add = (who: Caption["who"], text: string) => setCaptions((c) => [...c, { who, text }]);
 
   const say = async (text: string | null) => {
@@ -90,6 +97,43 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const worker = new Worker(new URL("../lib/handTracker.worker.ts", import.meta.url), { type: "module" });
+    let active = true;
+    let ready = false;
+    let busy = false;
+    worker.onmessage = (event: MessageEvent<HandMessage>) => {
+      if (!active) return;
+      const message = event.data;
+      if (message.type === "ready") { ready = true; setHandTracking("ready"); return; }
+      busy = false;
+      if (message.type === "error") { ready = false; setHandTracking("unavailable"); setHands([]); return; }
+      setHands(message.hands);
+      if (roiSelectedRef.current) {
+        const roi = roiRef.current;
+        const margin = 0.07;
+        const near = message.hands.some((hand) => [4, 8, 12, 16, 20].some((index) => {
+          const point = hand[index];
+          return point && point.x >= roi.x - margin && point.x <= roi.x + roi.w + margin && point.y >= roi.y - margin && point.y <= roi.y + roi.h + margin;
+        }));
+        controllerRef.current?.updateHandNearInlet(near);
+      }
+    };
+    worker.onerror = () => { busy = false; ready = false; setHandTracking("unavailable"); };
+    worker.postMessage({ type: "init" });
+    const timer = window.setInterval(async () => {
+      const video = videoRef.current;
+      if (!active || !ready || busy || document.hidden || !video || video.readyState < 2) return;
+      busy = true;
+      try {
+        const bitmap = await createImageBitmap(video);
+        if (!active) { bitmap.close(); return; }
+        worker.postMessage({ type: "frame", bitmap, timestamp: performance.now() }, [bitmap]);
+      } catch { busy = false; ready = false; setHandTracking("unavailable"); }
+    }, 160);
+    return () => { active = false; window.clearInterval(timer); worker.terminate(); };
+  }, []);
+
   const cover = videoSize.width && videoSize.height && viewportSize.width && viewportSize.height
     ? (() => {
         const scale = Math.max(viewportSize.width / videoSize.width, viewportSize.height / videoSize.height);
@@ -106,6 +150,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     const y = cover ? (e.clientY - rect.top + cover.offsetY) / cover.height : (e.clientY - rect.top) / rect.height;
     const next = roiAround(x, y);
     roiRef.current = next;
+    roiSelectedRef.current = true;
     setRoi(next);
     setRoiSelected(true);
   };
@@ -150,8 +195,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         video,
         getRoi: () => roiRef.current,
         sessionId: update.session.session_id,
+        stateVersion: update.session.state_version,
         onUpdate: (u) => {
           setSession(u.session);
+          controllerRef.current?.setStateVersion(u.session.state_version);
           if (u.transition_reason === "model_billing_required") setError("Meta vision is blocked: this API key needs billing enabled. The camera cannot verify steps yet.");
           else if (u.transition_reason === "model_unauthorized") setError("Meta vision rejected this API key or model permission.");
           else if (u.transition_reason === "model_error") setError("Image analysis could not run. Try again or save completed work in History.");
@@ -175,6 +222,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       controllerRef.current?.invalidateInFlight();
       const update = await api.voice(sessionId, intent, via);
       setSession(update.session);
+      controllerRef.current?.setStateVersion(update.session.state_version);
       controllerRef.current?.setPaused(update.session.paused);
       if (intent === "RESTART") controllerRef.current?.start();
       await say(update.spoken_hint);
@@ -192,7 +240,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     }
     if (parsed.kind === "question") {
       try {
-        const answer = await api.ask(vehicleId, parsed.text);
+        const answer = await api.ask(vehicleId, parsed.text, session?.session_id);
         await say(answer.text);
       } catch {
         setError("I could not get an answer. Please ask again.");
@@ -214,7 +262,17 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     <div className={`viewport${session ? " session-active" : ""}`} ref={viewportRef} onClick={pickRoi}>
       <video ref={videoRef} playsInline muted onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}/>
       <div className="camera-vignette"/>
+      {cover && hands.length > 0 && <svg className="hand-overlay" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
+        {hands.flatMap((hand, handIndex) => [
+          ...HAND_CHAINS.map((chain, chainIndex) => <path key={`h${handIndex}-c${chainIndex}`} d={chain.map((index, pointIndex) => {
+            const point = hand[index];
+            return `${pointIndex ? "L" : "M"}${(point.x * cover.width - cover.offsetX).toFixed(1)} ${(point.y * cover.height - cover.offsetY).toFixed(1)}`;
+          }).join(" ")}/>),
+          ...[4, 8, 12, 16, 20].map((index) => <circle key={`h${handIndex}-p${index}`} cx={hand[index].x * cover.width - cover.offsetX} cy={hand[index].y * cover.height - cover.offsetY} r="3.4"/>),
+        ])}
+      </svg>}
       <span className="camera-tag"><Icon name="camera" size={15}/>{session ? "Live view" : cameraAvailable ? "Rear camera" : "Camera unavailable"}</span>
+      {cameraAvailable && handTracking !== "loading" && <span className="hand-tracking-tag">{handTracking === "unavailable" ? "Hand cues unavailable" : hands.length ? "Hands in view" : "Watching for hands"}</span>}
       {!session && <span className="camera-center-hint"><Icon name="inspect" size={31}/><strong>{roiSelected ? "Inlet area selected" : "Tap the inlet on screen"}</strong><small>Carmori will focus on this area</small></span>}
       {roiSelected && <div className="roi" style={cover ? { left: roi.x * cover.width - cover.offsetX, top: roi.y * cover.height - cover.offsetY, width: roi.w * cover.width, height: roi.h * cover.height } : { left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.w * 100}%`, height: `${roi.h * 100}%` }}><span>Inlet area</span></div>}
       {done && <div className="camera-complete"><span><Icon name="check" size={30}/></span><strong>Saved</strong></div>}
