@@ -1,13 +1,19 @@
 import type { MaintenanceRecord } from "./api";
 
-export type ServiceComponent = "engine_oil" | "tires" | "brake_pads" | "cabin_filter" | "engine_air_filter";
+export type ServiceComponent = "engine_oil" | "engine_oil_filter" | "tires" | "brake_pads" | "brake_fluid" | "transmission_fluid" | "cabin_filter" | "engine_air_filter" | "spark_plugs" | "engine_coolant" | "drive_belt";
 
 export const SERVICE_COMPONENTS: { id: ServiceComponent; label: string; short: string }[] = [
   { id: "engine_oil", label: "Engine oil", short: "Oil" },
+  { id: "engine_oil_filter", label: "Oil filter", short: "Filter" },
   { id: "tires", label: "Tires", short: "Tire" },
   { id: "brake_pads", label: "Brake pads", short: "Brake" },
+  { id: "brake_fluid", label: "Brake fluid", short: "Fluid" },
+  { id: "transmission_fluid", label: "Transmission fluid", short: "Trans" },
   { id: "cabin_filter", label: "Cabin air filter", short: "Cabin" },
   { id: "engine_air_filter", label: "Engine air filter", short: "Engine" },
+  { id: "spark_plugs", label: "Spark plugs", short: "Spark" },
+  { id: "engine_coolant", label: "Engine coolant", short: "Coolant" },
+  { id: "drive_belt", label: "Drive belt", short: "Belt" },
 ];
 
 export const MAINTENANCE_LABELS: Record<string, string> = {
@@ -44,7 +50,8 @@ export function saveServiceInterval(vehicleId: string, component: ServiceCompone
 }
 
 export function latestService(records: MaintenanceRecord[], component: ServiceComponent): MaintenanceRecord | null {
-  return records.filter((record) => record.component === component && record.event_type === "replacement" && record.user_confirmed)
+  return records.filter((record) => record.component === component &&
+    (record.event_type === "replacement" || (component === "tires" && record.event_type === "rotation")) && record.user_confirmed)
     .sort((a, b) => b.completed_at.localeCompare(a.completed_at))[0] ?? null;
 }
 

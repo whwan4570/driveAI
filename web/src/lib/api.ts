@@ -1,4 +1,5 @@
 // 백엔드 계약(backend/carmori/main.py)과 같은 모양을 유지한다.
+import type { ServiceComponent } from "./serviceIntervals";
 
 export type Step = "FIND_INLET" | "OPEN_CAP" | "CONFIRM_PRODUCT" | "POUR" | "FINISH" | "RECORDED";
 export type WaitReason =
@@ -24,6 +25,13 @@ export interface VehicleSpecView {
   years: [number, number];
 }
 
+export interface OwnerManualStatus {
+  status: "unsupported" | "available" | "downloading" | "ready" | "failed";
+  title: string | null;
+  source_url: string | null;
+  manual_url: string | null;
+}
+
 export interface Vehicle {
   vehicle_id: string;
   spec_id: string;
@@ -31,6 +39,7 @@ export interface Vehicle {
   make: string | null;
   model: string | null;
   trim: string | null;
+  body_style: "sedan" | "hatchback" | null;
   odometer_km: number | null;
   odometer_updated_at: string | null;
   region: string | null;
@@ -53,6 +62,7 @@ export interface Vehicle {
   model_3d_status: "unavailable" | "ready";
   model_3d_updated_at: string | null;
   profile_source: "manual" | "scan" | "document" | "demo";
+  created_at: string;
 }
 
 export interface CareEvidence {
@@ -79,8 +89,20 @@ export interface CareRecommendation {
 
 export interface CareResponse {
   recommendations: CareRecommendation[];
-  environment: { status: "available" | "unavailable"; provider: string; area: string | null; time_window: string | null; last_successful_update: string | null; rainfall_mm: number | null };
+  environment: { status: "available" | "unavailable"; provider: string; area: string | null; time_window: string | null; last_successful_update: string | null; rainfall_mm: number | null; forecast_low_c?: number | null };
   calculated_at: string;
+}
+
+export interface WasherShoppingPick {
+  kind: "all_season" | "winter" | "extreme_cold" | "check_weather";
+  product_name: string | null;
+  freeze_rating_f: number | null;
+  forecast_low_c: number | null;
+  weather_as_of: string | null;
+  reason: string;
+  manufacturer_url: string | null;
+  shop_url: string;
+  retailer_verified: boolean;
 }
 
 export interface InspectionResult {
@@ -196,6 +218,29 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: "POST", body: JSON.stringify(body) });
 
+function bodyStyleKey(vehicleId: string): string { return `carmori:body-style:${vehicleId}`; }
+function issueConfirmationKey(vehicleId: string): string { return `carmori:issue-confirmed:${vehicleId}`; }
+function rememberBodyStyle(vehicleId: string, style: Vehicle["body_style"]): void {
+  try {
+    if (style) localStorage.setItem(bodyStyleKey(vehicleId), style);
+    else localStorage.removeItem(bodyStyleKey(vehicleId));
+  } catch { /* The server still stores the value when browser storage is unavailable. */ }
+}
+function withBodyStyle(vehicle: Vehicle): Vehicle {
+  let saved: Vehicle["body_style"] = null;
+  let locallyConfirmed = false;
+  try {
+    const value = localStorage.getItem(bodyStyleKey(vehicle.vehicle_id));
+    if (value === "sedan" || value === "hatchback") saved = value;
+    locallyConfirmed = localStorage.getItem(issueConfirmationKey(vehicle.vehicle_id)) === "true";
+  } catch { /* Use the server value. */ }
+  const demoSedan = vehicle.profile_source === "demo" && vehicle.year === 2021 &&
+    vehicle.make?.toLowerCase() === "honda" && vehicle.model?.toLowerCase() === "civic" &&
+    !/type r|hatch/i.test(vehicle.trim ?? "");
+  return { ...vehicle, body_style: saved ?? vehicle.body_style ?? (demoSedan ? "sedan" : null),
+    major_issue_free_confirmed: vehicle.major_issue_free_confirmed || locallyConfirmed };
+}
+
 export const api = {
   health: () => call<{ ok: boolean; spark: string; demo_mode: boolean; vision_status: "unverified" | "ready" | "missing_key" | "billing_required" | "unauthorized" | "provider_error" }>("/health"),
   vehicleSpecs: () => call<VehicleSpecView[]>("/vehicle-specs"),
@@ -209,30 +254,70 @@ export const api = {
     post<VehicleScanResult>("/vehicles/recognize", body),
   recognizeDocument: (body: { document_type: DocumentType; mime_type: "image/jpeg" | "image/png" | "application/pdf"; data_base64: string }) =>
     post<VehicleScanResult>("/vehicles/recognize-document", body),
-  createVehicle: (body: { spec_id: string; year: number; make: string; model: string; trim?: string; exterior_color: string; odometer_km: number; odometer_updated_at: string; region?: string; weekly_miles?: number; highway_percent?: number; nickname?: string; purchased_on?: string | null; first_drive_on?: string | null; major_issue_free_confirmed?: boolean; profile_source: "manual" | "scan" | "document" | "demo" }) =>
-    post<Vehicle>("/vehicles", body),
-  vehicle: (vehicleId: string) => call<Vehicle>(`/vehicles/${vehicleId}`),
-  updateVehicle: (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname" | "purchased_on" | "first_drive_on" | "major_issue_free_confirmed">>) =>
-    call<Vehicle>(`/vehicles/${vehicleId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  createVehicle: async (body: { spec_id: string; year: number; make: string; model: string; trim?: string; body_style?: "sedan" | "hatchback" | null; exterior_color: string; odometer_km: number; odometer_updated_at: string; region?: string; weekly_miles?: number; highway_percent?: number; nickname?: string; purchased_on?: string | null; first_drive_on?: string | null; major_issue_free_confirmed?: boolean; profile_source: "manual" | "scan" | "document" | "demo" }) => {
+    let vehicle: Vehicle;
+    try {
+      vehicle = await post<Vehicle>("/vehicles", body);
+    } catch (error) {
+      if (!body.major_issue_free_confirmed || body.purchased_on || !(error instanceof Error) || !error.message.endsWith(" 422")) throw error;
+      vehicle = await post<Vehicle>("/vehicles", { ...body, major_issue_free_confirmed: false });
+      localStorage.setItem(issueConfirmationKey(vehicle.vehicle_id), "true");
+    }
+    if (body.body_style) rememberBodyStyle(vehicle.vehicle_id, body.body_style);
+    return withBodyStyle(vehicle);
+  },
+  vehicle: async (vehicleId: string) => withBodyStyle(await call<Vehicle>(`/vehicles/${vehicleId}`)),
+  ownerManualStatus: (vehicleId: string) => call<OwnerManualStatus>(`/vehicles/${vehicleId}/owner-manual/status`),
+  ownerManualUrl: (vehicleId: string) => `${BASE}/vehicles/${vehicleId}/owner-manual`,
+  retryOwnerManual: (vehicleId: string) => post<OwnerManualStatus>(`/vehicles/${vehicleId}/owner-manual/retry`, {}),
+  updateVehicle: async (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "body_style" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname" | "purchased_on" | "first_drive_on" | "major_issue_free_confirmed">>) => {
+    let vehicle: Vehicle;
+    try {
+      vehicle = await call<Vehicle>(`/vehicles/${vehicleId}`, { method: "PATCH", body: JSON.stringify(body) });
+    } catch (error) {
+      // An older running local API still requires a purchase date for this confirmation.
+      if (body.major_issue_free_confirmed !== true || !(error instanceof Error) || !error.message.endsWith(" 422")) throw error;
+      const [current, issues] = await Promise.all([
+        call<Vehicle>(`/vehicles/${vehicleId}`), call<MajorIssue[]>(`/vehicles/${vehicleId}/major-issues`),
+      ]);
+      if (("purchased_on" in body ? body.purchased_on : current.purchased_on) || issues.length) throw error;
+      const updated = await call<Vehicle>(`/vehicles/${vehicleId}`, {
+        method: "PATCH", body: JSON.stringify({ ...body, major_issue_free_confirmed: false }),
+      });
+      if ("body_style" in body) rememberBodyStyle(vehicleId, body.body_style ?? null);
+      localStorage.setItem(issueConfirmationKey(vehicleId), "true");
+      return withBodyStyle({ ...updated, major_issue_free_confirmed: true });
+    }
+    if ("body_style" in body) rememberBodyStyle(vehicleId, body.body_style ?? null);
+    if ("major_issue_free_confirmed" in body) {
+      if (body.major_issue_free_confirmed) localStorage.setItem(issueConfirmationKey(vehicleId), "true");
+      else localStorage.removeItem(issueConfirmationKey(vehicleId));
+    }
+    return withBodyStyle(vehicle);
+  },
   // Phone GPS: distance over the past 7 days and an approximate location for weather.
   drivingSummary: (vehicleId: string, body: { weekly_miles?: number; highway_percent?: number | null; lat?: number; lon?: number }) =>
     call<Vehicle>(`/vehicles/${vehicleId}/driving-summary`, { method: "PUT", body: JSON.stringify(body) }),
   retryVehicleImage: (vehicleId: string) => post<Vehicle>(`/vehicles/${vehicleId}/generate-image`, {}),
   memory: (vehicleId: string) => call<MaintenanceRecord[]>(`/vehicles/${vehicleId}/memory`),
   majorIssues: (vehicleId: string) => call<MajorIssue[]>(`/vehicles/${vehicleId}/major-issues`),
-  addMajorIssue: (vehicleId: string, body: { kind: MajorIssueKind; occurred_on: string; notes?: string }) =>
-    post<MajorIssue>(`/vehicles/${vehicleId}/major-issues`, body),
+  addMajorIssue: async (vehicleId: string, body: { kind: MajorIssueKind; occurred_on: string; notes?: string }) => {
+    const issue = await post<MajorIssue>(`/vehicles/${vehicleId}/major-issues`, body);
+    localStorage.removeItem(issueConfirmationKey(vehicleId));
+    return issue;
+  },
   deleteMajorIssue: (vehicleId: string, issueId: string) =>
     call<void>(`/vehicles/${vehicleId}/major-issues/${issueId}`, { method: "DELETE" }),
   care: (vehicleId: string) => call<CareResponse>(`/vehicles/${vehicleId}/care-recommendations`),
-  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | "tires" | "engine_oil" | "brake_pads" | "cabin_filter" | "engine_air_filter"; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
+  washerShopping: (vehicleId: string) => call<WasherShoppingPick>(`/vehicles/${vehicleId}/shopping/washer`),
+  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | ServiceComponent; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
   analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire"; jpeg_base64: string }) =>
     post<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),
   ask: (vehicleId: string, question: string, sessionId?: string) =>
-    post<{ text: string; fact_ids: string[] }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
+    post<{ text: string; fact_ids: string[]; source_url?: string | null; source_label?: string | null }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
   startSession: (vehicleId: string) => post<SessionUpdate>("/sessions", { vehicle_id: vehicleId }),
   observe: (sessionId: string, windows: WindowIn[], expectedStateVersion: number) =>
     post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows, expected_state_version: expectedStateVersion }),

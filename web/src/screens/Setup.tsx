@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
 import { VehiclePicker } from "../components/VehiclePicker";
+import { VehicleConfigurationFields, inferredCivicBodyStyle, isCivic, type BodyStyle } from "../components/VehicleConfigurationFields";
 import { api, type DocumentType, type VehicleScanResult, type VehicleSpecView } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
 import { todayLocalISO } from "../lib/vehicleDates";
@@ -32,6 +33,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [trim, setTrim] = useState("");
+  const [bodyStyle, setBodyStyle] = useState<BodyStyle | "">("");
   const [nickname, setNickname] = useState("");
   const [purchasedOn, setPurchasedOn] = useState("");
   const [firstDriveOn, setFirstDriveOn] = useState("");
@@ -95,6 +97,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       setMake(result.make ?? "");
       setModel(result.model ?? "");
       setTrim(result.trim ?? "");
+      setBodyStyle(inferredCivicBodyStyle(result.model ?? "", result.trim ?? ""));
       setYear(result.year ?? "");
       setExteriorColor(result.exterior_color ?? "");
       setCameraOpen(false);
@@ -127,6 +130,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       setMake(result.make ?? "");
       setModel(result.model ?? "");
       setTrim(result.trim ?? "");
+      setBodyStyle(inferredCivicBodyStyle(result.model ?? "", result.trim ?? ""));
       setYear(result.year ?? "");
       setExteriorColor(result.exterior_color ?? "");
       if (result.sale_date) setPurchasedOn(result.sale_date);
@@ -149,11 +153,12 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     }
     if ((firstDriveOn && purchasedOn && firstDriveOn < purchasedOn) ||
         (purchasedOn && purchasedOn > todayLocalISO()) ||
-        (firstDriveOn && firstDriveOn > todayLocalISO()) ||
-        (majorIssueFreeConfirmed && !purchasedOn)) {
+        (firstDriveOn && firstDriveOn > todayLocalISO())) {
       setError("Check the purchase and first-drive dates before continuing.");
       return;
     }
+    if (isCivic(make, model) && !bodyStyle) { setError("Select your Civic body style."); return; }
+    if (/type r/i.test(`${model} ${trim}`) && bodyStyle !== "hatchback") { setError("Type R uses the Hatchback body style."); return; }
     setSaving(true);
     setError(null);
     try {
@@ -161,6 +166,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
         spec_id: specId,
         year,
         make: make.trim(), model: model.trim(), trim: trim.trim() || undefined,
+        body_style: isCivic(make, model) ? bodyStyle || null : null,
         nickname: nickname.trim() || undefined, exterior_color: exteriorColor.trim(),
         purchased_on: purchasedOn || null, first_drive_on: firstDriveOn || null,
         major_issue_free_confirmed: majorIssueFreeConfirmed,
@@ -240,13 +246,14 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}{scanResult.sale_date ? " Confirm the suggested sale date is when you bought this car." : ""}</p></>
         : <><h2>Vehicle details</h2><p className="review-note">Add your car to personalize care suggestions.</p></>}
-      <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
+      <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); setBodyStyle(inferredCivicBodyStyle(next.model)); setTrim(""); }}/>
       {specs.length > 1 && <label>Vehicle guide<select value={specId} onChange={(e) => setSpecId(e.target.value)}>{specs.map((s) => <option key={s.spec_id} value={s.spec_id}>{s.display_name}</option>)}</select></label>}
-      <div className="review-fields"><label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(e) => setTrim(e.target.value)} maxLength={60} placeholder="e.g. EX"/></label></div>
+      <label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label>
+      <VehicleConfigurationFields make={make} model={model} bodyStyle={bodyStyle} onBodyStyleChange={setBodyStyle} trim={trim} onTrimChange={setTrim}/>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
       <div className="review-fields"><label>Purchase date <span className="optional">optional</span><input type="date" max={todayLocalISO()} value={purchasedOn} onChange={(e) => { setPurchasedOn(e.target.value); setMajorIssueFreeConfirmed(false); }}/></label><label>First drive date <span className="optional">optional</span><input type="date" min={purchasedOn || undefined} max={todayLocalISO()} value={firstDriveOn} onChange={(e) => setFirstDriveOn(e.target.value)}/></label></div>
-      <p className="form-help">A sale date may be on your bill of sale or odometer disclosure. Enter when you first drove this car separately.</p>
-      <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} disabled={!purchasedOn} onChange={(e) => setMajorIssueFreeConfirmed(e.target.checked)}/><span>No major issues since purchase. This includes accidents, engine or transmission failures, brake or steering failures, and breakdowns requiring a tow. Routine maintenance is excluded.</span></label>
+      <p className="form-help">Don't know these dates? Leave them blank. Your count starts the day you add this car to Carmori.</p>
+      <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} onChange={(e) => setMajorIssueFreeConfirmed(e.target.checked)}/><span>No major issues since {purchasedOn ? "purchase" : "starting Carmori"}. This includes accidents, engine or transmission failures, brake or steering failures, and breakdowns requiring a tow. Routine maintenance is excluded.</span></label>
       <label>Exterior color<input value={exteriorColor} onChange={(e) => setExteriorColor(e.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>
       <p className="review-note">Carmori creates your vehicle image automatically from these confirmed details.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="Current reading" required/></label><label>Unit<select value={odometerUnit} onChange={(e) => setOdometerUnit(e.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>

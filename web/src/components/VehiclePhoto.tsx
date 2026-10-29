@@ -7,6 +7,7 @@ export function VehiclePhoto({ vehicle }: { vehicle: Vehicle | null }) {
   }
   const demoCivic = vehicle?.profile_source === "demo" && vehicle.year === 2021 &&
     vehicle.make?.toLowerCase() === "honda" && vehicle.model?.toLowerCase() === "civic" &&
+    vehicle.body_style !== "hatchback" && !/type r/i.test(vehicle.trim ?? "") &&
     (!vehicle.exterior_color || /silver|gray|grey/i.test(vehicle.exterior_color));
   if (demoCivic) {
     return <><img className="vehicle-photo is-demo" src="/civic-2021-silver.png" alt="Representative image of a silver 2021 Honda Civic sedan"/><span className="vehicle-photo-label">{vehicle.image_status === "pending" ? "Creating image" : "Sample image"}</span></>;

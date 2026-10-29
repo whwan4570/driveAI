@@ -116,7 +116,7 @@ export function Documents({ vehicleId, records, storageError, onChanged, onBack 
       const saved = records.find((record) => record.kind === item.kind);
       const reminder = saved ? documentReminder(saved) : null;
       return <section className="document-card" key={item.kind}>
-        <div className="document-card-top"><span className="document-card-icon"><Icon name={item.kind === "insurance" ? "shield" : item.kind === "sticker" ? "calendar" : "file"} size={20}/></span><div><h2>{item.label}</h2><p>{saved?.expiresOn ? `Renews ${formatVehicleDate(saved.expiresOn)}` : "Add renewal date"}</p></div>{reminder && <span className={`document-due${reminder.urgent ? " urgent" : ""}`}>{reminder.label}</span>}</div>
+        <div className="document-card-top"><span className="document-card-icon"><Icon name={item.kind === "insurance" ? "shield" : item.kind === "sticker" ? "calendar" : "file"} size={20}/></span><div><h2>{item.label}</h2><p>{saved?.expiresOn ? `Renews ${formatVehicleDate(saved.expiresOn)}` : "Add renewal date"} · {saved?.file ? "Saved offline" : "No offline copy"}</p></div>{reminder && <span className={`document-due${reminder.urgent ? " urgent" : ""}`}>{reminder.label}</span>}</div>
         <div className="document-card-actions"><button type="button" onClick={() => view(item.kind)}>{saved?.file ? "View copy" : "Add copy"}</button><button type="button" onClick={() => beginEdit(item.kind)}>{saved ? "Edit" : "Set reminder"}</button>{saved?.expiresOn && <button type="button" onClick={() => downloadRenewalReminder(saved)}>Add to calendar</button>}</div>
       </section>;
     })}</div>

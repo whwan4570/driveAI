@@ -33,6 +33,9 @@ from .care import Recommendation, calculate_recommendations
 from .config import Settings
 from .hints import STEP_ENTRY_HINT, hint_text
 from .inspection import InspectionResult, Inspector, MetaInspector, UnavailableInspector
+from .manual_cache import ManualCache
+from .manual_catalog import match_owner_manual
+from .manual_guidance import find_manual_guidance
 from .models import (
     CompletionSource,
     MaintenanceRecord,
@@ -47,6 +50,7 @@ from .models import (
     WaitReason,
 )
 from .spark import MetaSparkClient, SparkClient, make_spark_client
+from .shopping import WasherShoppingPick, choose_washer_fluid
 from .sam_video import MetaSamVideoTracker, SamTarget, SamVideoResult, SamVideoTracker
 from .state_machine import TransitionResult, apply_voice, new_session, transition
 from .store import MemoryStore, SQLiteStore, Store
@@ -70,15 +74,12 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def check_relationship_dates(purchased_on: date | None, first_drive_on: date | None,
-                             major_issue_free_confirmed: bool) -> None:
+def check_relationship_dates(purchased_on: date | None, first_drive_on: date | None) -> None:
     today = utcnow().date()
     if (purchased_on and purchased_on > today) or (first_drive_on and first_drive_on > today):
         raise HTTPException(422, "vehicle dates cannot be in the future")
     if purchased_on and first_drive_on and first_drive_on < purchased_on:
         raise HTTPException(422, "first drive cannot be before purchase date")
-    if major_issue_free_confirmed and purchased_on is None:
-        raise HTTPException(422, "purchase date is needed to confirm issue-free history")
 
 
 class FrameIn(BaseModel):
@@ -141,6 +142,7 @@ class VehicleIn(BaseModel):
     make: str | None = None
     model: str | None = None
     trim: str | None = None
+    body_style: Literal["sedan", "hatchback"] | None = None
     odometer_km: int | None = Field(default=None, ge=0)
     odometer_updated_at: datetime | None = None
     region: str | None = Field(default=None, max_length=120)
@@ -159,6 +161,7 @@ class VehiclePatchIn(BaseModel):
     make: str | None = None
     model: str | None = None
     trim: str | None = None
+    body_style: Literal["sedan", "hatchback"] | None = None
     odometer_km: int | None = Field(default=None, ge=0)
     odometer_updated_at: datetime | None = None
     region: str | None = Field(default=None, max_length=120)
@@ -215,6 +218,8 @@ class AskIn(BaseModel):
 class AskOut(BaseModel):
     text: str
     fact_ids: list[str]
+    source_url: str | None = None
+    source_label: str | None = None
 
 
 class BriefingIn(BaseModel):
@@ -230,7 +235,7 @@ class BriefingOut(BaseModel):
 
 class ManualRecordIn(BaseModel):
     vehicle_id: str
-    component: Literal["washer_fluid", "tires", "engine_oil", "brake_pads", "cabin_filter", "engine_air_filter"] = "washer_fluid"
+    component: Literal["washer_fluid", "tires", "engine_oil", "engine_oil_filter", "brake_pads", "brake_fluid", "transmission_fluid", "cabin_filter", "engine_air_filter", "spark_plugs", "engine_coolant", "drive_belt"] = "washer_fluid"
     event_type: Literal["inspection", "refill", "rotation", "replacement"] = "refill"
     completed_at: datetime = Field(default_factory=utcnow)
     odometer_km: int | None = Field(default=None, ge=0)
@@ -256,6 +261,7 @@ def create_app(
     sam_tracker: SamVideoTracker | None = None,
     environment_provider: EnvironmentProvider | None = None,
     model_catalog: ModelCatalog | None = None,
+    manual_cache: ManualCache | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     spark = spark or make_spark_client(settings)
@@ -272,6 +278,8 @@ def create_app(
     # A GPU worker can publish a viewer-ready GLB here. SAM 3D's raw splat PLY is
     # not accepted by model-viewer; conversion and alignment happen before upload.
     model_dir = Path(settings.db_path).expanduser().parent / "vehicle-models" if settings.db_path else Path(tempfile.mkdtemp(prefix="carmori-models-"))
+    manual_dir = Path(settings.db_path).expanduser().parent / "manuals" if settings.db_path else Path(tempfile.mkdtemp(prefix="carmori-manuals-"))
+    manual_cache = manual_cache or ManualCache(manual_dir)
 
     app = FastAPI(title="Carmori")
     app.add_middleware(
@@ -288,11 +296,17 @@ def create_app(
             raise HTTPException(404, "vehicle not found")
         return vehicle, spec
 
-    def image_identity(vehicle: VehicleProfile) -> tuple[int, str | None, str | None, str | None, str | None]:
-        return (vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.exterior_color)
+    def image_identity(vehicle: VehicleProfile) -> tuple[int, str | None, str | None, str | None, str | None, str | None]:
+        return (vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.body_style, vehicle.exterior_color)
 
     def can_generate(vehicle: VehicleProfile) -> bool:
         return bool(vehicle.make and vehicle.model and vehicle.exterior_color)
+
+    def queue_owner_manual(vehicle: VehicleProfile, background_tasks: BackgroundTasks) -> None:
+        if settings.auto_fetch_manuals and manual_cache.queue(vehicle):
+            manual = match_owner_manual(vehicle)
+            if manual is not None:
+                background_tasks.add_task(manual_cache.ensure, manual)
 
     async def generate_vehicle_image(vehicle_id: str, identity: tuple) -> None:
         async with locks[f"image:{vehicle_id}"]:
@@ -387,7 +401,7 @@ def create_app(
         spec = get_spec(body.spec_id)
         if spec is None or not spec.years[0] <= body.year <= spec.years[1]:
             raise HTTPException(422, "unsupported vehicle")
-        check_relationship_dates(body.purchased_on, body.first_drive_on, body.major_issue_free_confirmed)
+        check_relationship_dates(body.purchased_on, body.first_drive_on)
         vehicle = VehicleProfile(
             vehicle_id=uuid.uuid4().hex,
             spec_id=spec.spec_id,
@@ -395,6 +409,7 @@ def create_app(
             make=clean_name(body.make),
             model=clean_name(body.model),
             trim=clean_name(body.trim),
+            body_style=body.body_style,
             odometer_km=body.odometer_km,
             odometer_updated_at=body.odometer_updated_at or (utcnow() if body.odometer_km is not None else None),
             region=clean_name(body.region),
@@ -412,6 +427,7 @@ def create_app(
             created_at=utcnow(),
         )
         store.save_vehicle(vehicle)
+        queue_owner_manual(vehicle, background_tasks)
         if can_generate(vehicle):
             background_tasks.add_task(generate_vehicle_image, vehicle.vehicle_id, image_identity(vehicle))
         return vehicle
@@ -419,6 +435,31 @@ def create_app(
     @app.get("/vehicles/{vehicle_id}")
     def get_vehicle(vehicle_id: str) -> VehicleProfile:
         return vehicle_or_404(vehicle_id)[0]
+
+    @app.get("/vehicles/{vehicle_id}/owner-manual/status")
+    def owner_manual_status(vehicle_id: str) -> dict:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        return manual_cache.status(vehicle)
+
+    @app.get("/vehicles/{vehicle_id}/owner-manual")
+    def owner_manual_pdf(vehicle_id: str) -> FileResponse:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        manual = match_owner_manual(vehicle)
+        if manual is None or not manual_cache.ready(manual):
+            raise HTTPException(404, "owner manual is not cached for this vehicle")
+        return FileResponse(manual_cache.path(manual), media_type="application/pdf",
+                            filename=manual.filename, content_disposition_type="inline",
+                            headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.post("/vehicles/{vehicle_id}/owner-manual/retry")
+    def retry_owner_manual(vehicle_id: str, background_tasks: BackgroundTasks) -> dict:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        manual = match_owner_manual(vehicle)
+        if manual is None:
+            raise HTTPException(404, "no verified owner manual for this vehicle")
+        if manual_cache.queue(vehicle):
+            background_tasks.add_task(manual_cache.ensure, manual)
+        return manual_cache.status(vehicle)
 
     @app.put("/vehicles/{vehicle_id}/3d-model")
     async def publish_vehicle_3d_model(vehicle_id: str, request: Request) -> VehicleProfile:
@@ -481,7 +522,7 @@ def create_app(
         if changes.get("purchased_on") is None and "purchased_on" in changes and "major_issue_free_confirmed" not in changes:
             changes["major_issue_free_confirmed"] = False
         updated = vehicle.model_copy(update=changes)
-        check_relationship_dates(updated.purchased_on, updated.first_drive_on, updated.major_issue_free_confirmed)
+        check_relationship_dates(updated.purchased_on, updated.first_drive_on)
         issues = store.list_major_issues(vehicle_id)
         if updated.major_issue_free_confirmed and issues:
             raise HTTPException(422, "cannot confirm no major issues while issues are logged")
@@ -492,6 +533,8 @@ def create_app(
                 "image_status": "pending" if can_generate(updated) else "needs_color", "image_error": None,
                 "model_3d_url": None, "model_3d_status": "unavailable", "model_3d_updated_at": None})
         store.save_vehicle(updated)
+        if (updated.year, updated.make, updated.model, updated.trim, updated.body_style) != (vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.body_style):
+            queue_owner_manual(updated, background_tasks)
         if updated.image_status == "pending" and image_identity(updated) != image_identity(vehicle):
             background_tasks.add_task(generate_vehicle_image, vehicle_id, image_identity(updated))
         return updated
@@ -540,6 +583,12 @@ def create_app(
             "calculated_at": now.isoformat(),
         }
 
+    @app.get("/vehicles/{vehicle_id}/shopping/washer")
+    async def washer_shopping(vehicle_id: str) -> WasherShoppingPick:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
+        return choose_washer_fluid(environment)
+
     @app.get("/vehicles/{vehicle_id}/memory")
     @app.get("/vehicles/{vehicle_id}/maintenance-records")
     def vehicle_memory(vehicle_id: str) -> list[MaintenanceRecord]:
@@ -581,7 +630,7 @@ def create_app(
         if (body.component == "washer_fluid" and body.event_type not in ("inspection", "refill")) or (
             body.component == "tires" and body.event_type not in ("inspection", "rotation", "replacement")
         ) or (
-            body.component in ("engine_oil", "brake_pads", "cabin_filter", "engine_air_filter") and body.event_type not in ("inspection", "replacement")
+            body.component in ("engine_oil", "engine_oil_filter", "brake_pads", "brake_fluid", "transmission_fluid", "cabin_filter", "engine_air_filter", "spark_plugs", "engine_coolant", "drive_belt") and body.event_type not in ("inspection", "replacement")
         ):
             raise HTTPException(422, "event type does not match component")
         if body.photo_data_url:
@@ -817,6 +866,20 @@ def create_app(
             text, ids = render_memory_answer(records, now)
             return AskOut(text=text, fact_ids=ids)
         facts = build_facts(vehicle, spec, records, None, now)
+        shopping_question = "washer" in question and any(word in question for word in ("buy", "purchase", "shop", "product", "recommend", "choose", "which", "order"))
+        shopping_pick = None
+        if shopping_question:
+            environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
+            shopping_pick = choose_washer_fluid(environment)
+            facts.append(Fact(id="washer_shopping", text=f"Washer-fluid shopping example: {shopping_pick.product_name or 'No product selected'}. {shopping_pick.reason}", source="Rain-X product guidance and Open-Meteo weather", as_of=now))
+            facts.append(Fact(id="retailer_unverified", text="No live retailer price, stock, or review ratings were checked. Carmori cannot claim a lowest price or place an order. The user must compare listings and complete checkout themselves.", source="Carmori shopping status", as_of=now))
+        manual_guidance = find_manual_guidance(vehicle, body.question, records)
+        if manual_guidance and manual_guidance.direct:
+            return AskOut(text=manual_guidance.text, fact_ids=["owner_manual"],
+                          source_url=manual_guidance.source_url, source_label=manual_guidance.source_label)
+        if manual_guidance:
+            facts = [fact for fact in facts if fact.id != "manufacturer_guidance"]
+            facts.append(Fact(id="owner_manual", text=manual_guidance.text, source=manual_guidance.source_label))
         if session is not None:
             facts.append(Fact(id="current_step", text=f"The washer fluid guide is at {session.step.value.replace('_', ' ').lower()}; {'paused' if session.paused else 'active'}.", source="current_session", as_of=now))
             if session.confirmed_product:
@@ -824,12 +887,20 @@ def create_app(
         try:
             answer = await asyncio.wait_for(spark.answer(body.question, facts), settings.spark_timeout_s)
         except Exception:  # noqa: BLE001
+            if manual_guidance:
+                return AskOut(text=manual_guidance.text, fact_ids=["owner_manual"], source_url=manual_guidance.source_url, source_label=manual_guidance.source_label)
             return AskOut(text="I cannot get an answer right now. Please ask again shortly.", fact_ids=[])
         known = {f.id for f in facts}
         if not answer.fact_ids or not set(answer.fact_ids) <= known:
             # 근거 사실을 대지 못한 답은 읽지 않는다.
+            if manual_guidance:
+                return AskOut(text=manual_guidance.text, fact_ids=["owner_manual"], source_url=manual_guidance.source_url, source_label=manual_guidance.source_label)
             return AskOut(text="I cannot answer that from your saved records.", fact_ids=[])
-        return AskOut(text=answer.text, fact_ids=answer.fact_ids)
+        if manual_guidance and "owner_manual" not in answer.fact_ids:
+            return AskOut(text=manual_guidance.text, fact_ids=["owner_manual"], source_url=manual_guidance.source_url, source_label=manual_guidance.source_label)
+        return AskOut(text=answer.text, fact_ids=answer.fact_ids,
+                      source_url=manual_guidance.source_url if manual_guidance else shopping_pick.manufacturer_url if shopping_pick else None,
+                      source_label=manual_guidance.source_label if manual_guidance else "Rain-X product information" if shopping_pick and shopping_pick.manufacturer_url else None)
 
     return app
 

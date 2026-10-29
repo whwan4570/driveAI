@@ -149,6 +149,7 @@ class VehicleProfile(BaseModel):
     make: str | None = None
     model: str | None = None
     trim: str | None = None
+    body_style: Literal["sedan", "hatchback"] | None = None
     odometer_km: int | None = None
     odometer_updated_at: datetime | None = None
     region: str | None = None

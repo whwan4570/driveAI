@@ -8,6 +8,7 @@ const RESUME_AFTER_TTS_MS = 300;
 export class VoiceIO {
   private vad: MicVAD | null = null;
   private speaking = false;
+  private speechDone: (() => void) | null = null;
   private listening = false;
   private peer: RTCPeerConnection | null = null;
   private peerStream: MediaStream | null = null;
@@ -32,6 +33,13 @@ export class VoiceIO {
         model: "legacy",
         baseAssetPath: "/vad/",
         onnxWASMBasePath: "/vad/",
+        ortConfig: (ort) => {
+          // Vite cannot dynamically import a JS module from public/. Serve the ORT loader as a source asset.
+          ort.env.wasm.wasmPaths = {
+            mjs: new URL("../vendor/ort-wasm-simd-threaded.mjs", import.meta.url).href,
+            wasm: new URL("/vad/ort-wasm-simd-threaded.wasm", window.location.origin).href,
+          };
+        },
         startOnLoad: false,
         onSpeechStart: () => { this.speechStartedAt = Date.now(); },
         onSpeechEnd: (audio) => {
@@ -119,6 +127,7 @@ export class VoiceIO {
 
   speak(text: string, lang = "en-US"): Promise<void> {
     return new Promise((resolve) => {
+      this.speechDone?.();
       speechSynthesis.cancel();
       this.speaking = true;
       void this.vad?.pause();
@@ -126,14 +135,21 @@ export class VoiceIO {
 
       const u = new SpeechSynthesisUtterance(text);
       u.lang = lang;
+      let finished = false;
       const done = () => {
+        if (finished) return;
+        finished = true;
+        if (this.speechDone === done) this.speechDone = null;
         this.speaking = false;
         setTimeout(() => {
-          if (this.listening && !this.speaking) void this.vad?.start();
-          this.peerStream?.getAudioTracks().forEach((track) => { track.enabled = true; });
+          if (!this.speaking) {
+            if (this.listening) void this.vad?.start();
+            this.peerStream?.getAudioTracks().forEach((track) => { track.enabled = true; });
+          }
           resolve();
         }, RESUME_AFTER_TTS_MS);
       };
+      this.speechDone = done;
       u.onend = done;
       u.onerror = done;
       speechSynthesis.speak(u);
@@ -141,11 +157,13 @@ export class VoiceIO {
   }
 
   cancelSpeech() {
+    this.speechDone?.();
     speechSynthesis.cancel();
   }
 
   async destroy() {
-    speechSynthesis.cancel();
+    this.listening = false;
+    this.cancelSpeech();
     if (this.pendingFallback !== null) window.clearTimeout(this.pendingFallback);
     this.pendingFallback = null;
     this.peer?.close();

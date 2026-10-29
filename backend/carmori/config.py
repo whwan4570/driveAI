@@ -19,6 +19,7 @@ class Settings:
     spark_reasoning_effort: str = "minimal"
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "https://localhost:5173")
     db_path: str | None = None
+    auto_fetch_manuals: bool = False  # from_env enables this for the running app; tests stay offline.
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -33,4 +34,5 @@ class Settings:
             spark_reasoning_effort=os.environ.get("SPARK_REASONING_EFFORT", cls.spark_reasoning_effort),
             cors_origins=tuple(origins.split(",")) if origins else cls.cors_origins,
             db_path=os.environ.get("CARMORI_DB_PATH") or str(Path(__file__).resolve().parent.parent / "data" / "carmori.sqlite"),
+            auto_fetch_manuals=os.environ.get("CARMORI_MANUAL_AUTO_FETCH", "true").lower() not in {"0", "false", "no"},
         )

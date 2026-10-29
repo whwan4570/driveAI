@@ -6,6 +6,21 @@ import type { CareRecommendation, CareResponse, Vehicle } from "../lib/api";
 type Severity = "clear" | "caution" | "warning" | "unknown";
 type Concern = { component: CareRecommendation["component"]; severity: "caution" | "warning"; item: CareRecommendation };
 
+function bundledModelFor(vehicle: Vehicle | null): string | null {
+  if (!vehicle) return null;
+  const make = vehicle.make?.trim().toLowerCase();
+  const model = vehicle.model?.trim().toLowerCase() || "";
+  const variant = `${model} ${vehicle.trim || ""}`.toLowerCase();
+  if (vehicle.year === 2014 && make === "hyundai" && /^sonata(?:\s|$)/.test(model) && !/hybrid/.test(variant)) {
+    return "/models/sonata.glb";
+  }
+  if (vehicle.year === 2021 && make === "honda" && /^civic(?:\s|$)/.test(model) &&
+      vehicle.body_style !== "hatchback" && !/hatch|type r|coupe|\bsi\b/.test(variant)) {
+    return "/models/civic.glb";
+  }
+  return null;
+}
+
 function paintColor(name: string | null | undefined): string {
   const color = (name || "").toLowerCase();
   if (/silver|gray|grey|platinum|lunar|steel/.test(color)) return "#aeb8c1";
@@ -26,19 +41,24 @@ function concernSeverity(priority: CareRecommendation["priority"]): Concern["sev
   return null;
 }
 
-export function StatusVehicle3D({ vehicle, care, loading }: {
+export function StatusVehicle3D({ vehicle, care, loading, samplePreview = false }: {
   vehicle: Vehicle | null;
   care: CareResponse | null;
   loading: boolean;
+  samplePreview?: boolean;
 }) {
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const [selected, setSelected] = useState<Concern | null>(null);
   const [modelReady, setModelReady] = useState(false);
   const [modelFailed, setModelFailed] = useState(false);
+  const [bundledFailed, setBundledFailed] = useState(false);
   const customModel = vehicle?.model_3d_status === "ready" && !!vehicle.model_3d_url && !modelFailed;
+  const bundledSrc = bundledModelFor(vehicle);
+  const bundledModel = !customModel && !!bundledSrc && !bundledFailed;
+  const detailedModel = customModel || bundledModel;
   const modelSrc = customModel
     ? `/api${vehicle.model_3d_url}?v=${encodeURIComponent(vehicle.model_3d_updated_at || "ready")}`
-    : "/models/modern-sedan.glb";
+    : bundledModel ? bundledSrc : "/models/modern-sedan.glb";
   const concerns = useMemo<Concern[]>(() => (care?.recommendations ?? []).flatMap((item) => {
     const severity = concernSeverity(item.priority);
     return severity ? [{ component: item.component, severity, item }] : [];
@@ -51,20 +71,24 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
     if (!viewer) return;
     setModelReady(false);
     const updatePaint = () => {
-      if (!customModel) {
+      if (!detailedModel) {
         const body = viewer.model?.materials.find((material) => material.name === "paint");
         body?.pbrMetallicRoughness.setBaseColorFactor(paintColor(vehicle?.exterior_color));
       }
       setModelReady(true);
     };
-    const onError = () => { if (customModel) setModelFailed(true); };
+    const onError = () => {
+      setModelReady(false);
+      if (customModel) setModelFailed(true);
+      else if (bundledModel) setBundledFailed(true);
+    };
     viewer.addEventListener("load", updatePaint);
     viewer.addEventListener("error", onError);
     if (viewer.model && viewer.getAttribute("src") === modelSrc) updatePaint();
     return () => { viewer.removeEventListener("load", updatePaint); viewer.removeEventListener("error", onError); };
-  }, [vehicle?.exterior_color, customModel, modelSrc]);
+  }, [vehicle?.exterior_color, customModel, bundledModel, detailedModel, modelSrc]);
 
-  useEffect(() => { setModelFailed(false); }, [vehicle?.vehicle_id, vehicle?.model_3d_updated_at]);
+  useEffect(() => { setModelFailed(false); setBundledFailed(false); }, [vehicle?.vehicle_id, vehicle?.model_3d_updated_at, vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.trim, vehicle?.body_style]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -91,7 +115,9 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
     key: concern.component,
     type: "button",
     slot: `hotspot-${concern.component}`,
-    "data-position": concern.component === "tires" ? "0.88m 0.36m 1.55m" : "0.4m 1.02m 1.65m",
+    "data-position": bundledModel
+      ? concern.component === "tires" ? "0.235m -0.105m 0.30m" : "0.10m 0.08m 0.34m"
+      : concern.component === "tires" ? "0.88m 0.36m 1.55m" : "0.4m 1.02m 1.65m",
     "data-normal": concern.component === "tires" ? "1m 0m 0m" : "0m 1m 0m",
     className: `vehicle-hotspot ${concern.severity}`,
     "aria-label": `${concern.item.title}. Show summary`,
@@ -101,19 +127,19 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
   return <section className="status-3d-card" aria-label="Interactive vehicle status">
     <div className="status-3d-header">
       <div><h2>{vehicle?.nickname || [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "My vehicle"}</h2><p>{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p></div>
-      <span className={`status-health-light ${severity}`} role="status"><span className="status-health-led"/>{severity === "clear" ? "No flagged items" : severity === "caution" ? `${concerns.length} to review` : severity === "warning" ? `${concerns.length} warning${concerns.length === 1 ? "" : "s"}` : "Checking"}</span>
+      <span className={`status-health-light ${severity}`} role="status"><span className="status-health-led"/>{severity === "clear" ? "No flagged items" : severity === "unknown" ? "Checking" : severity === "warning" && concerns.every((concern) => concern.severity === "warning") ? `${concerns.length} warning${concerns.length === 1 ? "" : "s"}` : `${concerns.length} to review`}</span>
     </div>
     <div className="status-model-stage">
       {createElement("model-viewer", {
-        key: `status-3d-framing-v4:${modelSrc}`,
+        key: `status-3d-framing-v6:${modelSrc}`,
         ref: viewerRef,
         className: "status-model-viewer",
         src: modelSrc,
-        alt: customModel ? `Rotatable 3D model of ${vehicle?.year} ${vehicle?.make} ${vehicle?.model}` : `Rotatable 3D illustration in ${vehicle?.exterior_color || "silver"}`,
+        alt: detailedModel ? `Rotatable 3D model of ${vehicle?.year} ${vehicle?.make} ${vehicle?.model}` : `Rotatable 3D illustration in ${vehicle?.exterior_color || "silver"}`,
         "camera-controls": "",
         "disable-pan": "",
-        "camera-orbit": customModel ? "25deg 70deg auto" : "20deg 75deg 6.8m",
-        "camera-target": customModel ? "auto auto auto" : "-0.3m 0.4m 0.35m",
+        "camera-orbit": detailedModel ? "25deg 70deg auto" : "20deg 75deg 6.8m",
+        "camera-target": detailedModel ? "auto auto auto" : "-0.3m 0.4m 0.35m",
         "field-of-view": "32deg",
         "interaction-prompt": "none",
         "shadow-intensity": "1",
@@ -130,6 +156,6 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
         <button className="status-concern-more" type="button" onClick={() => viewDetails(selected.component)}>View details <span aria-hidden="true">↓</span></button>
       </div>}
     </div>
-    <p className="status-3d-disclaimer">{customModel ? "Generated 3D model" : "Illustrative 3D model"} · Status is based on saved records, not live diagnostics.</p>
+    <p className="status-3d-disclaimer">{customModel ? "Generated 3D model" : bundledModel ? "Vehicle 3D model" : "Illustrative 3D model"} · {samplePreview ? "Sample alerts, not vehicle diagnostics." : "Status is based on saved records, not live diagnostics."}</p>
   </section>;
 }

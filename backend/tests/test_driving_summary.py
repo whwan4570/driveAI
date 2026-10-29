@@ -20,7 +20,7 @@ class RecordingWeather:
         self.calls.append((region, coords))
         if coords is None:
             return EnvironmentContext(area=region)
-        return EnvironmentContext(status="available", rainfall_mm=14.0, last_successful_update=datetime.now(timezone.utc))
+        return EnvironmentContext(status="available", rainfall_mm=14.0, forecast_low_c=-2.0, last_successful_update=datetime.now(timezone.utc))
 
 
 def setup(tmp_path):
@@ -80,10 +80,27 @@ def test_open_meteo_uses_coordinates_without_geocoding(monkeypatch):
 
         async def get(self, url, params=None):
             requested.append(url)
-            body = {"daily": {"time": ["d1", "d2", "today"], "rain_sum": [3.0, 4.5, 0.0]}}
+            body = {"daily": {"time": ["d1", "d2", "today"], "rain_sum": [3.0, 4.5, 0.0], "temperature_2m_min": [8.0, 7.0, -2.0]}}
             return httpx.Response(200, json=body, request=httpx.Request("GET", url))
 
     monkeypatch.setattr("carmori.weather.httpx.AsyncClient", FakeClient)
     result = asyncio.run(OpenMeteoEnvironment().get(None, (47.61, -122.33)))
     assert result.status == "available" and result.rainfall_mm == 7.5 and result.area is None
+    assert result.forecast_low_c == -2.0
     assert all("geocoding" not in url for url in requested)
+
+
+def test_washer_shopping_uses_existing_weather_context(tmp_path):
+    client, weather, vid = setup(tmp_path)
+    client.put(f"/vehicles/{vid}/driving-summary", json={"lat": 47.61, "lon": -122.33})
+    response = client.get(f"/vehicles/{vid}/shopping/washer")
+    assert response.status_code == 200
+    assert response.json()["kind"] == "winter"
+    assert response.json()["retailer_verified"] is False
+    assert weather.calls[-1] == (None, (47.61, -122.33))
+    answer = client.post("/assistant/ask", json={
+        "vehicle_id": vid,
+        "question": "Which washer fluid should I buy? Have you checked prices?",
+    }).json()
+    assert "washer_shopping" in answer["fact_ids"]
+    assert "retailer_unverified" in answer["fact_ids"]

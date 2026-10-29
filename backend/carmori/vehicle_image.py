@@ -31,7 +31,7 @@ class MetaVehicleImageGenerator:
     async def generate(self, vehicle: VehicleProfile) -> str:
         if not self.settings.meta_api_key:
             raise VehicleImageError("Muse Image is not connected yet. Add a Meta Model API key.")
-        identity = " ".join(str(value) for value in (vehicle.year, vehicle.make, vehicle.model, vehicle.trim) if value)
+        identity = " ".join(str(value) for value in (vehicle.year, vehicle.make, vehicle.model, vehicle.body_style, vehicle.trim) if value)
         paint = vehicle.exterior_color or ""
         prompt = (
             f"Create one photorealistic studio product image of a {identity} in {paint} exterior paint. "

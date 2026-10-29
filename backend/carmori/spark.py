@@ -72,6 +72,7 @@ class MetaSparkClient:
         prompt = (
             "Answer the user's vehicle question using ONLY the supplied facts. "
             "Say when a measurement or vehicle-specific guidance is unknown. "
+            "Never claim to have checked a lowest price, reviews, stock, or completed a purchase unless a supplied fact explicitly verifies it. "
             "Return only JSON with keys text (short string) and fact_ids (array of used fact ids). "
             "Never invent service intervals, fluid levels, tire condition, or repair safety.\n"
             f"Facts: {json.dumps(payload)}\nQuestion: {question}"

@@ -64,6 +64,13 @@ export function App() {
     setStarted(true);
   };
 
+  const stop = async () => {
+    voice.cancelSpeech();
+    await voice.stopListening();
+    setVoiceReady(false);
+    setStarted(false);
+  };
+
   const startTask = async () => {
     try {
       await start();
@@ -76,7 +83,7 @@ export function App() {
   };
 
   return screen === "home" ? (
-    <Home vehicleId={vehicleId} started={started} onStart={start} onStartTask={startTask} />
+    <Home vehicleId={vehicleId} started={started} onStart={start} onStop={stop} onStartTask={startTask} />
   ) : (
     <Work vehicleId={vehicleId} voiceReady={voiceReady} onDone={() => setScreen("home")} />
   );
