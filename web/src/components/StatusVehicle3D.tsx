@@ -66,9 +66,25 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
 
   useEffect(() => { setModelFailed(false); }, [vehicle?.vehicle_id, vehicle?.model_3d_updated_at]);
 
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const stage = viewer?.parentElement;
+    if (!viewer || !stage) return;
+    const syncViewerSize = () => {
+      if (stage.clientWidth > 0) viewer.style.width = `${stage.clientWidth}px`;
+      if (stage.clientHeight > 0) viewer.style.height = `${stage.clientHeight}px`;
+      const input = viewer.shadowRoot?.querySelector<HTMLElement>(".userInput");
+      if (input) input.style.outline = "none";
+    };
+    const observer = new ResizeObserver(syncViewerSize);
+    observer.observe(stage);
+    syncViewerSize();
+    return () => observer.disconnect();
+  }, [modelSrc]);
+
   const viewDetails = (component: Concern["component"]) => {
     setSelected(null);
-    document.getElementById(`status-detail-${component}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById(`status-detail-${component}`)?.click();
   };
 
   const hotspots = concerns.map((concern) => createElement("button", {
@@ -84,34 +100,36 @@ export function StatusVehicle3D({ vehicle, care, loading }: {
 
   return <section className="status-3d-card" aria-label="Interactive vehicle status">
     <div className="status-3d-header">
-      <div><span className="section-overline">CURRENT VEHICLE</span><h2>{vehicle?.nickname || [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "My vehicle"}</h2><p>{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi on record`}</p></div>
+      <div><h2>{vehicle?.nickname || [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "My vehicle"}</h2><p>{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p></div>
       <span className={`status-health-light ${severity}`} role="status"><span className="status-health-led"/>{severity === "clear" ? "No flagged items" : severity === "caution" ? `${concerns.length} to review` : severity === "warning" ? `${concerns.length} warning${concerns.length === 1 ? "" : "s"}` : "Checking"}</span>
     </div>
     <div className="status-model-stage">
       {createElement("model-viewer", {
+        key: `status-3d-framing-v4:${modelSrc}`,
         ref: viewerRef,
         className: "status-model-viewer",
         src: modelSrc,
         alt: customModel ? `Rotatable 3D model of ${vehicle?.year} ${vehicle?.make} ${vehicle?.model}` : `Rotatable 3D illustration in ${vehicle?.exterior_color || "silver"}`,
         "camera-controls": "",
-        "camera-orbit": "35deg 72deg 6.5m",
-        "camera-target": "0m 0.72m 0m",
-        "field-of-view": "29deg",
+        "disable-pan": "",
+        "camera-orbit": customModel ? "25deg 70deg auto" : "20deg 75deg 6.8m",
+        "camera-target": customModel ? "auto auto auto" : "-0.3m 0.4m 0.35m",
+        "field-of-view": "32deg",
         "interaction-prompt": "none",
         "shadow-intensity": "1",
         exposure: "1.15",
         "touch-action": "pan-y",
       }, ...(customModel ? [] : hotspots))}
-      {customModel && concerns.length > 0 && <div className="status-model-issues" aria-label="Areas to review">{concerns.map((concern) => <button key={concern.component} type="button" className={concern.severity} onClick={() => setSelected(concern)}>{concern.item.title}</button>)}</div>}
+      {customModel && concerns.length > 0 && !selected && <div className="status-model-issues" aria-label="Areas to review">{concerns.map((concern) => <button key={concern.component} type="button" className={concern.severity} onClick={() => setSelected(concern)}>{concern.item.title}</button>)}</div>}
       {!modelReady && <span className="status-model-loading">Loading 3D view…</span>}
+      {selected && <div className={`status-concern-popover ${selected.severity}`} role="region" aria-label={`${selected.item.title} summary`}>
+        <button className="status-concern-close" type="button" onClick={() => setSelected(null)} aria-label="Close summary">×</button>
+        <span className="status-concern-level">{selected.severity === "warning" ? "WARNING" : "CHECK SOON"}</span>
+        <strong>{selected.item.title}</strong>
+        <p>{selected.item.explanation}</p>
+        <button className="status-concern-more" type="button" onClick={() => viewDetails(selected.component)}>View details <span aria-hidden="true">↓</span></button>
+      </div>}
     </div>
-    {selected && <div className={`status-concern-popover ${selected.severity}`} role="region" aria-label={`${selected.item.title} summary`}>
-      <button className="status-concern-close" type="button" onClick={() => setSelected(null)} aria-label="Close summary">×</button>
-      <span className="status-concern-level">{selected.severity === "warning" ? "WARNING" : "CHECK SOON"}</span>
-      <strong>{selected.item.title}</strong>
-      <p>{selected.item.explanation}</p>
-      <button className="status-concern-more" type="button" onClick={() => viewDetails(selected.component)}>View details <span aria-hidden="true">↓</span></button>
-    </div>}
-    <p className="status-3d-disclaimer">{customModel ? "Vehicle-specific 3D file ·" : "Illustrative 3D sedan ·"} Status comes from saved records, not live car sensors.</p>
+    <p className="status-3d-disclaimer">{customModel ? "Generated 3D model" : "Illustrative 3D model"} · Status is based on saved records, not live diagnostics.</p>
   </section>;
 }

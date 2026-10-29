@@ -4,7 +4,7 @@ export type IconName =
   | "car" | "home" | "status" | "assistant" | "inspect" | "history" | "washer"
   | "calendar" | "cloud" | "mic" | "play" | "pause" | "close"
   | "arrow" | "check" | "camera" | "volume" | "spark" | "eye"
-  | "refresh" | "bell" | "shield" | "chevron";
+  | "refresh" | "bell" | "shield" | "chevron" | "file";
 
 export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number }) {
   const shared = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const, ...props };
@@ -32,6 +32,7 @@ export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { 
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 6.5-2.5 8-2.5 10h17C20.5 16 18 14.5 18 8Z"/><path d="M10 21h4"/></>,
     shield: <><path d="M12 2 20 5v6c0 5-3 8-8 11-5-3-8-6-8-11V5l8-3Z"/><path d="m8 12 3 3 5-6"/></>,
     chevron: <path d="m9 5 7 7-7 7"/>,
+    file: <><path d="M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,
   };
   return <svg {...shared}>{paths[name]}</svg>;
 }

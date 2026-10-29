@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
-from .models import CompletionEvent, CompletionSource, MaintenanceRecord, SessionState, VehicleProfile
+from .models import CompletionEvent, CompletionSource, MaintenanceRecord, MajorIssue, SessionState, VehicleProfile
 
 
 class Store(Protocol):
@@ -21,6 +21,9 @@ class Store(Protocol):
         self, event: CompletionEvent, model_version: str
     ) -> tuple[MaintenanceRecord, bool]: ...
     def list_records(self, vehicle_id: str) -> list[MaintenanceRecord]: ...
+    def add_major_issue(self, issue: MajorIssue) -> MajorIssue: ...
+    def list_major_issues(self, vehicle_id: str) -> list[MajorIssue]: ...
+    def delete_major_issue(self, vehicle_id: str, issue_id: str) -> bool: ...
 
 
 class MemoryStore:
@@ -28,6 +31,7 @@ class MemoryStore:
         self.vehicles: dict[str, VehicleProfile] = {}
         self.sessions: dict[str, SessionState] = {}
         self.records: dict[str, MaintenanceRecord] = {}
+        self.major_issues: dict[str, MajorIssue] = {}
         self._by_completion: dict[str, str] = {}
 
     def save_vehicle(self, vehicle: VehicleProfile) -> None:
@@ -80,6 +84,21 @@ class MemoryStore:
             reverse=True,
         )
 
+    def add_major_issue(self, issue: MajorIssue) -> MajorIssue:
+        self.major_issues[issue.issue_id] = issue
+        return issue
+
+    def list_major_issues(self, vehicle_id: str) -> list[MajorIssue]:
+        return sorted((i for i in self.major_issues.values() if i.vehicle_id == vehicle_id),
+                      key=lambda i: (i.occurred_on, i.created_at), reverse=True)
+
+    def delete_major_issue(self, vehicle_id: str, issue_id: str) -> bool:
+        issue = self.major_issues.get(issue_id)
+        if issue is None or issue.vehicle_id != vehicle_id:
+            return False
+        del self.major_issues[issue_id]
+        return True
+
 
 class SQLiteStore:
     """Single-user local MVP store. JSON columns preserve the validated Pydantic schema."""
@@ -108,6 +127,14 @@ class SQLiteStore:
                 );
                 CREATE INDEX IF NOT EXISTS records_vehicle_date
                     ON records(vehicle_id, completed_at DESC);
+                CREATE TABLE IF NOT EXISTS major_issues (
+                    issue_id TEXT PRIMARY KEY,
+                    vehicle_id TEXT NOT NULL,
+                    occurred_on TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS major_issues_vehicle_date
+                    ON major_issues(vehicle_id, occurred_on DESC);
             """)
 
     def save_vehicle(self, vehicle: VehicleProfile) -> None:
@@ -182,3 +209,25 @@ class SQLiteStore:
                 "SELECT payload FROM records WHERE vehicle_id=? ORDER BY completed_at DESC", (vehicle_id,)
             ).fetchall()
         return [MaintenanceRecord.model_validate_json(row["payload"]) for row in rows]
+
+    def add_major_issue(self, issue: MajorIssue) -> MajorIssue:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO major_issues(issue_id,vehicle_id,occurred_on,payload) VALUES(?,?,?,?)",
+                (issue.issue_id, issue.vehicle_id, issue.occurred_on.isoformat(), issue.model_dump_json()),
+            )
+        return issue
+
+    def list_major_issues(self, vehicle_id: str) -> list[MajorIssue]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT payload FROM major_issues WHERE vehicle_id=? ORDER BY occurred_on DESC", (vehicle_id,)
+            ).fetchall()
+        return [MajorIssue.model_validate_json(row["payload"]) for row in rows]
+
+    def delete_major_issue(self, vehicle_id: str, issue_id: str) -> bool:
+        with self._lock, self._db:
+            cursor = self._db.execute(
+                "DELETE FROM major_issues WHERE vehicle_id=? AND issue_id=?", (vehicle_id, issue_id)
+            )
+        return cursor.rowcount > 0

@@ -6,8 +6,9 @@ SessionState는 서버만 바꾸며, 바뀔 때는 state_machine.transition()을
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -161,6 +162,10 @@ class VehicleProfile(BaseModel):
     location_lon: float | None = None
     location_updated_at: datetime | None = None
     nickname: str | None = None
+    purchased_on: date | None = None
+    first_drive_on: date | None = None
+    # Explicit user statement; absence of issue records alone is not evidence of an issue-free period.
+    major_issue_free_confirmed: bool = False
     exterior_color: str | None = None
     generated_image_data_url: str | None = None
     image_status: str = "needs_color"
@@ -169,6 +174,18 @@ class VehicleProfile(BaseModel):
     model_3d_status: str = "unavailable"
     model_3d_updated_at: datetime | None = None
     profile_source: str = "manual"
+    created_at: datetime
+
+
+MajorIssueKind = Literal["accident", "engine", "transmission", "brakes_steering", "tow_required"]
+
+
+class MajorIssue(BaseModel):
+    issue_id: str
+    vehicle_id: str
+    kind: MajorIssueKind
+    occurred_on: date
+    notes: str | None = None
     created_at: datetime
 
 

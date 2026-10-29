@@ -1,0 +1,13 @@
+{
+  "name": "Carmori",
+  "short_name": "Carmori",
+  "description": "Your car records and driving documents",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f8fa",
+  "theme_color": "#17384b",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

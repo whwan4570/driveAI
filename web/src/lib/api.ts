@@ -42,6 +42,9 @@ export interface Vehicle {
   location_lon: number | null;
   location_updated_at: string | null;
   nickname: string | null;
+  purchased_on: string | null;
+  first_drive_on: string | null;
+  major_issue_free_confirmed: boolean;
   exterior_color: string | null;
   generated_image_data_url: string | null;
   image_status: "needs_color" | "pending" | "ready" | "failed";
@@ -101,10 +104,11 @@ export interface VehicleScanResult {
   exterior_color: string | null;
   vin_last4: string | null;
   document_type: DocumentType | null;
+  sale_date: string | null;
   message: string;
 }
 
-export type DocumentType = "buyers_guide" | "odometer_disclosure" | "vehicle_history_report" | "window_sticker";
+export type DocumentType = "bill_of_sale" | "buyers_guide" | "odometer_disclosure" | "vehicle_history_report" | "window_sticker";
 
 export interface SessionView {
   session_id: string;
@@ -128,6 +132,17 @@ export interface MaintenanceRecord {
   notes: string | null;
   user_confirmed: boolean;
   photo_data_url: string | null;
+}
+
+export type MajorIssueKind = "accident" | "engine" | "transmission" | "brakes_steering" | "tow_required";
+
+export interface MajorIssue {
+  issue_id: string;
+  vehicle_id: string;
+  kind: MajorIssueKind;
+  occurred_on: string;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface SessionUpdate {
@@ -174,6 +189,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (!res.ok) throw new Error(`${path} ${res.status}`);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -193,18 +209,23 @@ export const api = {
     post<VehicleScanResult>("/vehicles/recognize", body),
   recognizeDocument: (body: { document_type: DocumentType; mime_type: "image/jpeg" | "image/png" | "application/pdf"; data_base64: string }) =>
     post<VehicleScanResult>("/vehicles/recognize-document", body),
-  createVehicle: (body: { spec_id: string; year: number; make: string; model: string; trim?: string; exterior_color: string; odometer_km: number; odometer_updated_at: string; region?: string; weekly_miles?: number; highway_percent?: number; nickname?: string; profile_source: "manual" | "scan" | "document" | "demo" }) =>
+  createVehicle: (body: { spec_id: string; year: number; make: string; model: string; trim?: string; exterior_color: string; odometer_km: number; odometer_updated_at: string; region?: string; weekly_miles?: number; highway_percent?: number; nickname?: string; purchased_on?: string | null; first_drive_on?: string | null; major_issue_free_confirmed?: boolean; profile_source: "manual" | "scan" | "document" | "demo" }) =>
     post<Vehicle>("/vehicles", body),
   vehicle: (vehicleId: string) => call<Vehicle>(`/vehicles/${vehicleId}`),
-  updateVehicle: (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname">>) =>
+  updateVehicle: (vehicleId: string, body: Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "exterior_color" | "odometer_km" | "odometer_updated_at" | "region" | "weekly_miles" | "highway_percent" | "nickname" | "purchased_on" | "first_drive_on" | "major_issue_free_confirmed">>) =>
     call<Vehicle>(`/vehicles/${vehicleId}`, { method: "PATCH", body: JSON.stringify(body) }),
   // Phone GPS: distance over the past 7 days and an approximate location for weather.
   drivingSummary: (vehicleId: string, body: { weekly_miles?: number; highway_percent?: number | null; lat?: number; lon?: number }) =>
     call<Vehicle>(`/vehicles/${vehicleId}/driving-summary`, { method: "PUT", body: JSON.stringify(body) }),
   retryVehicleImage: (vehicleId: string) => post<Vehicle>(`/vehicles/${vehicleId}/generate-image`, {}),
   memory: (vehicleId: string) => call<MaintenanceRecord[]>(`/vehicles/${vehicleId}/memory`),
+  majorIssues: (vehicleId: string) => call<MajorIssue[]>(`/vehicles/${vehicleId}/major-issues`),
+  addMajorIssue: (vehicleId: string, body: { kind: MajorIssueKind; occurred_on: string; notes?: string }) =>
+    post<MajorIssue>(`/vehicles/${vehicleId}/major-issues`, body),
+  deleteMajorIssue: (vehicleId: string, issueId: string) =>
+    call<void>(`/vehicles/${vehicleId}/major-issues/${issueId}`, { method: "DELETE" }),
   care: (vehicleId: string) => call<CareResponse>(`/vehicles/${vehicleId}/care-recommendations`),
-  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | "tires"; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
+  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | "tires" | "engine_oil" | "brake_pads" | "cabin_filter" | "engine_air_filter"; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
   analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire"; jpeg_base64: string }) =>
     post<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body),

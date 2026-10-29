@@ -12,7 +12,7 @@ import json
 import tempfile
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +36,8 @@ from .inspection import InspectionResult, Inspector, MetaInspector, UnavailableI
 from .models import (
     CompletionSource,
     MaintenanceRecord,
+    MajorIssue,
+    MajorIssueKind,
     Observation,
     SceneAnswer,
     SessionState,
@@ -66,6 +68,17 @@ if not _carmori_log.handlers:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def check_relationship_dates(purchased_on: date | None, first_drive_on: date | None,
+                             major_issue_free_confirmed: bool) -> None:
+    today = utcnow().date()
+    if (purchased_on and purchased_on > today) or (first_drive_on and first_drive_on > today):
+        raise HTTPException(422, "vehicle dates cannot be in the future")
+    if purchased_on and first_drive_on and first_drive_on < purchased_on:
+        raise HTTPException(422, "first drive cannot be before purchase date")
+    if major_issue_free_confirmed and purchased_on is None:
+        raise HTTPException(422, "purchase date is needed to confirm issue-free history")
 
 
 class FrameIn(BaseModel):
@@ -134,6 +147,9 @@ class VehicleIn(BaseModel):
     weekly_miles: float | None = Field(default=None, ge=0, le=3000)
     highway_percent: int | None = Field(default=None, ge=0, le=100)
     nickname: str | None = Field(default=None, max_length=60)
+    purchased_on: date | None = None
+    first_drive_on: date | None = None
+    major_issue_free_confirmed: bool = False
     exterior_color: str | None = Field(default=None, max_length=40)
     profile_source: Literal["manual", "scan", "document", "demo"] = "manual"
 
@@ -149,7 +165,16 @@ class VehiclePatchIn(BaseModel):
     weekly_miles: float | None = Field(default=None, ge=0, le=3000)
     highway_percent: int | None = Field(default=None, ge=0, le=100)
     nickname: str | None = Field(default=None, max_length=60)
+    purchased_on: date | None = None
+    first_drive_on: date | None = None
+    major_issue_free_confirmed: bool = False
     exterior_color: str | None = Field(default=None, max_length=40)
+
+
+class MajorIssueIn(BaseModel):
+    kind: MajorIssueKind
+    occurred_on: date
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class DrivingSummaryIn(BaseModel):
@@ -205,7 +230,7 @@ class BriefingOut(BaseModel):
 
 class ManualRecordIn(BaseModel):
     vehicle_id: str
-    component: Literal["washer_fluid", "tires"] = "washer_fluid"
+    component: Literal["washer_fluid", "tires", "engine_oil", "brake_pads", "cabin_filter", "engine_air_filter"] = "washer_fluid"
     event_type: Literal["inspection", "refill", "rotation", "replacement"] = "refill"
     completed_at: datetime = Field(default_factory=utcnow)
     odometer_km: int | None = Field(default=None, ge=0)
@@ -362,6 +387,7 @@ def create_app(
         spec = get_spec(body.spec_id)
         if spec is None or not spec.years[0] <= body.year <= spec.years[1]:
             raise HTTPException(422, "unsupported vehicle")
+        check_relationship_dates(body.purchased_on, body.first_drive_on, body.major_issue_free_confirmed)
         vehicle = VehicleProfile(
             vehicle_id=uuid.uuid4().hex,
             spec_id=spec.spec_id,
@@ -377,6 +403,9 @@ def create_app(
             driving_updated_at=utcnow() if body.weekly_miles is not None or body.highway_percent is not None else None,
             driving_source="manual" if body.weekly_miles is not None or body.highway_percent is not None else None,
             nickname=clean_name(body.nickname),
+            purchased_on=body.purchased_on,
+            first_drive_on=body.first_drive_on,
+            major_issue_free_confirmed=body.major_issue_free_confirmed,
             exterior_color=clean_name(body.exterior_color),
             image_status="pending" if body.make and body.model and body.exterior_color else "needs_color",
             profile_source=body.profile_source,
@@ -449,7 +478,15 @@ def create_app(
         if "weekly_miles" in changes or "highway_percent" in changes:
             changes["driving_updated_at"] = utcnow()
             changes["driving_source"] = "manual"
+        if changes.get("purchased_on") is None and "purchased_on" in changes and "major_issue_free_confirmed" not in changes:
+            changes["major_issue_free_confirmed"] = False
         updated = vehicle.model_copy(update=changes)
+        check_relationship_dates(updated.purchased_on, updated.first_drive_on, updated.major_issue_free_confirmed)
+        issues = store.list_major_issues(vehicle_id)
+        if updated.major_issue_free_confirmed and issues:
+            raise HTTPException(422, "cannot confirm no major issues while issues are logged")
+        if updated.purchased_on and any(issue.occurred_on < updated.purchased_on for issue in issues):
+            raise HTTPException(422, "purchase date is after a logged major issue")
         if image_identity(updated) != image_identity(vehicle):
             updated = updated.model_copy(update={"generated_image_data_url": None,
                 "image_status": "pending" if can_generate(updated) else "needs_color", "image_error": None,
@@ -509,13 +546,42 @@ def create_app(
         vehicle_or_404(vehicle_id)
         return store.list_records(vehicle_id)
 
+    @app.get("/vehicles/{vehicle_id}/major-issues")
+    def list_major_issues(vehicle_id: str) -> list[MajorIssue]:
+        vehicle_or_404(vehicle_id)
+        return store.list_major_issues(vehicle_id)
+
+    @app.post("/vehicles/{vehicle_id}/major-issues", status_code=201)
+    def add_major_issue(vehicle_id: str, body: MajorIssueIn) -> MajorIssue:
+        vehicle, _ = vehicle_or_404(vehicle_id)
+        if body.occurred_on > utcnow().date():
+            raise HTTPException(422, "issue date cannot be in the future")
+        if vehicle.purchased_on and body.occurred_on < vehicle.purchased_on:
+            raise HTTPException(422, "issue date cannot be before purchase date")
+        issue = store.add_major_issue(MajorIssue(
+            issue_id=uuid.uuid4().hex, vehicle_id=vehicle_id, kind=body.kind,
+            occurred_on=body.occurred_on, notes=body.notes.strip() if body.notes else None,
+            created_at=utcnow(),
+        ))
+        if vehicle.major_issue_free_confirmed:
+            store.save_vehicle(vehicle.model_copy(update={"major_issue_free_confirmed": False}))
+        return issue
+
+    @app.delete("/vehicles/{vehicle_id}/major-issues/{issue_id}", status_code=204)
+    def delete_major_issue(vehicle_id: str, issue_id: str) -> None:
+        vehicle_or_404(vehicle_id)
+        if not store.delete_major_issue(vehicle_id, issue_id):
+            raise HTTPException(404, "major issue not found")
+
     @app.post("/maintenance-records")
     def create_manual_record(body: ManualRecordIn) -> MaintenanceRecord:
         vehicle_or_404(body.vehicle_id)
         if not body.user_confirmed:
             raise HTTPException(422, "completed maintenance requires user confirmation")
         if (body.component == "washer_fluid" and body.event_type not in ("inspection", "refill")) or (
-            body.component == "tires" and body.event_type == "refill"
+            body.component == "tires" and body.event_type not in ("inspection", "rotation", "replacement")
+        ) or (
+            body.component in ("engine_oil", "brake_pads", "cabin_filter", "engine_air_filter") and body.event_type not in ("inspection", "replacement")
         ):
             raise HTTPException(422, "event type does not match component")
         if body.photo_data_url:

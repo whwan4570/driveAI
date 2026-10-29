@@ -151,6 +151,27 @@ def test_assistant_recounts_latest_confirmed_tire_action():
     assert answer["fact_ids"] == [saved["record_id"]]
 
 
+def test_service_replacements_are_saved_and_recounted():
+    client = make_client()
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    for component in ("engine_oil", "brake_pads", "cabin_filter", "engine_air_filter"):
+        saved = client.post("/maintenance-records", json={
+            "vehicle_id": vid, "component": component, "event_type": "replacement",
+            "user_confirmed": True, "odometer_km": 80000,
+        })
+        assert saved.status_code == 200
+        assert saved.json()["component"] == component
+        invalid = client.post("/maintenance-records", json={
+            "vehicle_id": vid, "component": component, "event_type": "refill",
+            "user_confirmed": True,
+        })
+        assert invalid.status_code == 422
+    memory = client.get(f"/vehicles/{vid}/memory").json()
+    assert len(memory) == 4
+    answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "What did I do earlier?"}).json()
+    assert "engine air filter replacement" in answer["text"]
+
+
 def test_vehicle_scan_requires_real_model_and_rejects_bad_images():
     client = make_client()
     image = base64.b64encode(b"\xff\xd8" + b"x" * 150 + b"\xff\xd9").decode()

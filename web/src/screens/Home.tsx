@@ -1,17 +1,23 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
-import { Icon, Waveform, type IconName } from "../components/Icons";
+import { Icon, type IconName } from "../components/Icons";
+import { HistorySummary } from "../components/HistorySummary";
+import { HistoryCalendar } from "../components/HistoryCalendar";
 import { VehiclePhoto } from "../components/VehiclePhoto";
-import { api, type CareResponse, type MaintenanceRecord, type Vehicle } from "../lib/api";
+import { ServiceStatus } from "../components/ServiceStatus";
+import { api, type CareResponse, type MaintenanceRecord, type MajorIssue, type Vehicle } from "../lib/api";
 import { parseUtterance } from "../lib/commands";
 import { DrivingGate } from "../lib/drivingGate";
 import { DriveMetrics, type DriveFix, type DriveSummary } from "../lib/driveMetrics";
+import { documentReminder, listDocuments, DOCUMENT_KINDS, type SavedDocument } from "../lib/documentVault";
+import { MAINTENANCE_LABELS } from "../lib/serviceIntervals";
 import { useUtterances, useVoice } from "../voiceContext";
 import { Captions, type Caption } from "./Captions";
+import { Documents } from "./Documents";
 import { RecordForm } from "./RecordForm";
 import { TireInspection } from "./TireInspection";
 import { VehicleEditor } from "./VehicleEditor";
 
-type Tab = "home" | "status" | "assistant" | "guide" | "history";
+type Tab = "home" | "status" | "assistant" | "guide" | "history" | "documents";
 const StatusVehicle3D = lazy(() => import("../components/StatusVehicle3D").then((module) => ({ default: module.StatusVehicle3D })));
 const SOURCE_LABEL: Record<MaintenanceRecord["completion_source"], string> = {
   observed_sequence: "Observed by camera",
@@ -29,14 +35,13 @@ function mph(metersPerSecond: number | null): string {
   return `${Math.round(metersPerSecond * 2.236936)} mph`;
 }
 
-function greeting(): string {
-  const hour = new Date().getHours();
-  return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-}
-
 function vehicleName(vehicle: Vehicle | null): string {
   if (!vehicle) return "Loading vehicle";
   return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
+}
+
+function priorityLabel(priority: string): string {
+  return ({ WARNING: "Warning", CHECK_SOON: "Check soon", INFORMATION_NEEDED: "Needs info", ROUTINE: "Routine" } as Record<string, string>)[priority] ?? priority;
 }
 
 export function Home({ vehicleId, started, onStart, onStartTask }: {
@@ -51,9 +56,15 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   const [typedQuestion, setTypedQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
+  const [majorIssues, setMajorIssues] = useState<MajorIssue[]>([]);
+  const [issuesLoading, setIssuesLoading] = useState(true);
+  const [issuesAvailable, setIssuesAvailable] = useState(false);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [imageRetrying, setImageRetrying] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [documents, setDocuments] = useState<SavedDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [care, setCare] = useState<CareResponse | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(true);
@@ -62,7 +73,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   const [recordOpen, setRecordOpen] = useState(false);
   const [tireOpen, setTireOpen] = useState(false);
   const [recordComponent, setRecordComponent] = useState<"washer_fluid" | "tires">("washer_fluid");
-  const [historyFilter, setHistoryFilter] = useState<"all" | "washer_fluid" | "tires">("all");
+  const [historyView, setHistoryView] = useState<"list" | "calendar">("list");
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,25 +97,42 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   const gateRef = useRef(new DrivingGate());
   const busyRef = useRef(false);
   const playBriefingRef = useRef<(source: "manual" | "auto") => Promise<void>>(async () => undefined);
+  const documentReturnTabRef = useRef<Tab>("home");
   const add = (who: Caption["who"], text: string) => setCaptions((c) => [...c, { who, text }]);
 
   const refreshData = async () => {
     setMemoryLoading(true);
     setCareLoading(true);
-    const [vehicleResult, recordsResult, careResult] = await Promise.allSettled([
-      api.vehicle(vehicleId), api.memory(vehicleId), api.care(vehicleId),
+    setIssuesLoading(true);
+    setIssuesAvailable(false);
+    const [vehicleResult, recordsResult, careResult, issuesResult] = await Promise.allSettled([
+      api.vehicle(vehicleId), api.memory(vehicleId), api.care(vehicleId), api.majorIssues(vehicleId),
     ]);
     if (vehicleResult.status === "fulfilled") setVehicle(vehicleResult.value);
     if (recordsResult.status === "fulfilled") setRecords(recordsResult.value);
     if (careResult.status === "fulfilled") setCare(careResult.value);
-    if (vehicleResult.status === "rejected" || recordsResult.status === "rejected" || careResult.status === "rejected") {
+    if (issuesResult.status === "fulfilled") {
+      setMajorIssues(issuesResult.value);
+      setIssuesAvailable(true);
+    }
+    if (vehicleResult.status === "rejected" || recordsResult.status === "rejected" || careResult.status === "rejected" || issuesResult.status === "rejected") {
       setError("Some vehicle information could not be refreshed. Try again.");
     }
     setMemoryLoading(false);
     setCareLoading(false);
+    setIssuesLoading(false);
   };
 
   useEffect(() => { void refreshData(); }, [vehicleId]);
+  const refreshDocuments = async () => {
+    try {
+      setDocuments(await listDocuments(vehicleId));
+      setDocumentsError(null);
+    } catch {
+      setDocumentsError("Local documents are unavailable in this browser.");
+    } finally { setDocumentsLoading(false); }
+  };
+  useEffect(() => { setDocumentsLoading(true); void refreshDocuments(); }, [vehicleId]);
   useEffect(() => { api.health().then((health) => setDemoMode(health.demo_mode)).catch(() => undefined); }, []);
 
   useEffect(() => {
@@ -167,6 +195,11 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     setTab(next);
     if (next === "status") setDriveSummary(metricsRef.current!.summary());
     document.documentElement.scrollTop = 0;
+  };
+
+  const openDocuments = () => {
+    if (tab !== "documents") documentReturnTabRef.current = tab;
+    goToTab("documents");
   };
 
   const openRecord = (component: "washer_fluid" | "tires") => {
@@ -387,69 +420,70 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   };
 
   const weekHighway = driveSummary.weekMeters ? Math.round((driveSummary.weekHighwayMeters / driveSummary.weekMeters) * 100) : null;
-  const washerCare = care?.recommendations.find((item) => item.component === "washer_fluid");
-  const tireCare = care?.recommendations.find((item) => item.component === "tires");
-  const shouldCheck = washerCare?.priority !== "ROUTINE";
-  const activeCareCount = care?.recommendations.filter((item) => item.priority === "CHECK_SOON").length ?? 0;
+  const activeCareCount = care?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
   const notificationItems = care?.recommendations.filter((item) => item.priority !== "ROUTINE") ?? [];
+  const documentAlerts = documents.filter((record) => record.vehicleId === vehicleId).flatMap((record) => {
+    const reminder = documentReminder(record);
+    return reminder ? [{ record, reminder }] : [];
+  }).sort((a, b) => a.reminder.days - b.reminder.days);
+  const savedDocumentCount = documents.filter((record) => record.vehicleId === vehicleId && record.file && record.kind !== "sticker").length;
   const openNotification = (component: "washer_fluid" | "tires") => {
     goToTab("status");
     requestAnimationFrame(() => requestAnimationFrame(() =>
-      document.getElementById(`status-detail-${component}`)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+      document.getElementById(`status-detail-${component}`)?.click()));
   };
-  const visibleRecords = records.filter((record) => historyFilter === "all" || record.component === historyFilter);
   const tabs: { id: Tab; label: string; icon: IconName }[] = [
     { id: "status", label: "Status", icon: "status" },
     { id: "assistant", label: "Assistant", icon: "assistant" },
     { id: "home", label: "Home", icon: "home" },
     { id: "guide", label: "Guide", icon: "inspect" },
-    { id: "history", label: "History", icon: "history" },
+    { id: "history", label: "Glove box", icon: "file" },
   ];
 
   return <div className="app-shell">
     <main className="screen home-screen">
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div>
-        <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">Demo Mode</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={18}/>{notificationItems.length > 0 && <span className="topbar-alert-count">{notificationItems.length}</span>}</button><button className="profile-button" type="button" onClick={() => setProfileOpen(true)} aria-label="Edit vehicle" title="Edit vehicle"><Icon name="car" size={19}/></button></div>
+        <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">Demo Mode</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={18}/>{notificationItems.length + documentAlerts.length > 0 && <span className="topbar-alert-count">{notificationItems.length + documentAlerts.length}</span>}</button><button className="profile-button" type="button" onClick={() => setProfileOpen(true)} aria-label="Edit vehicle" title="Edit vehicle"><Icon name="car" size={19}/></button></div>
       </header>
 
       {notificationsOpen && <section className="notifications-panel" id="vehicle-notifications" aria-label="Vehicle notifications">
-        <div className="notifications-heading"><div><strong>Notifications</strong><span>From your saved records</span></div><button type="button" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><Icon name="close" size={16}/></button></div>
-        {careLoading && <p className="notifications-empty">Checking your vehicle records…</p>}
-        {!careLoading && !care && <p className="notifications-empty">Notifications are unavailable right now.</p>}
-        {!careLoading && care && notificationItems.length === 0 && <p className="notifications-empty">No items need your attention in saved records.</p>}
+        <div className="notifications-heading"><div><strong>Notifications</strong></div><button type="button" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><Icon name="close" size={16}/></button></div>
+        {(careLoading || documentsLoading) && <p className="notifications-empty">Checking saved records…</p>}
+        {!careLoading && !documentsLoading && notificationItems.length + documentAlerts.length === 0 && <p className="notifications-empty">No items need your attention in saved records.</p>}
         {!careLoading && notificationItems.map((item) => <button className="notification-item" type="button" key={item.id} onClick={() => openNotification(item.component)}><span className={`notification-dot ${item.priority === "WARNING" ? "warning" : "caution"}`}/><span><strong>{item.title}</strong><small>{item.priority === "WARNING" ? "Warning" : item.priority === "CHECK_SOON" ? "Check soon" : "Needs information"}</small></span><Icon name="chevron" size={15}/></button>)}
+        {documentAlerts.map(({ record, reminder }) => <button className="notification-item" type="button" key={`document-${record.kind}`} onClick={openDocuments}><span className={`notification-dot ${reminder.urgent ? "warning" : "caution"}`}/><span><strong>{DOCUMENT_KINDS.find((item) => item.kind === record.kind)?.label} renewal</strong><small>{reminder.label}</small></span><Icon name="chevron" size={15}/></button>)}
         <p className="notifications-footnote">Live dashboard alerts are not connected.</p>
       </section>}
 
-      {profileOpen && vehicle && <VehicleEditor vehicle={vehicle} onSaved={(updated) => { setVehicle(updated); setProfileOpen(false); void refreshData(); }} onCancel={() => setProfileOpen(false)}/>}
+      {profileOpen && vehicle && <VehicleEditor vehicle={vehicle} hasMajorIssues={majorIssues.length > 0} onSaved={(updated) => { setVehicle(updated); setProfileOpen(false); void refreshData(); }} onCancel={() => setProfileOpen(false)}/>}
 
       {!profileOpen && tab === "home" && <>
         <p className="eyebrow home-kicker">YOUR DRIVE, REMEMBERED</p>
         <section className="vehicle-briefing-card" aria-label="My vehicle and briefing">
           <div className="vehicle-briefing-top">
-            <div className="vehicle-briefing-copy"><span className="section-overline">MY VEHICLE</span><h1>{vehicle?.nickname || vehicleName(vehicle)}</h1>{vehicle?.nickname && <p className="vehicle-model">{vehicleName(vehicle)}</p>}<p className="vehicle-mileage">{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi on record`}</p><button className="vehicle-edit-link" type="button" onClick={() => setProfileOpen(true)}>Edit vehicle <Icon name="chevron" size={15}/></button></div>
+            <div className="vehicle-briefing-copy"><h1>{vehicle?.nickname || vehicleName(vehicle)}</h1>{vehicle?.nickname && <p className="vehicle-model">{vehicleName(vehicle)}</p>}<p className="vehicle-mileage">{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p><button className="vehicle-edit-link" type="button" onClick={() => setProfileOpen(true)}>Edit vehicle <Icon name="chevron" size={15}/></button></div>
             <div className="vehicle-photo-stage"><VehiclePhoto vehicle={vehicle}/></div>
           </div>
           {vehicle?.image_status === "failed" && <div className="vehicle-image-error" role="status"><span>{vehicle.image_error || "Vehicle image unavailable."}</span><button type="button" onClick={() => void retryImage()} disabled={imageRetrying}>{imageRetrying ? "Trying…" : "Retry"}</button></div>}
           <div className="vehicle-briefing-body">
-          <p className="vehicle-briefing-greeting"><strong>{greeting()}.</strong> {careLoading ? "Reviewing your car's saved information…" : activeCareCount ? `${activeCareCount} item${activeCareCount === 1 ? "" : "s"} worth checking today.` : "Your care plan is ready."}</p>
-          <div className="vehicle-briefing-play"><button className="drive-briefing-icon" type="button" onClick={() => void playBriefing("manual")} disabled={busy} aria-label="Hear briefing" title="Hear briefing"><Icon name="volume" size={23}/></button><div><strong>Hear briefing</strong><span>A quick update from your saved records</span></div><span className="drive-briefing-badge">READY</span></div>
-          <div className="drive-auto-row"><div><strong>Auto when driving</strong><small>Uses location speed while this page is open</small></div><button type="button" role="switch" aria-checked={autoEnabled} aria-label="Auto briefing when driving" className={`drive-auto-switch${autoEnabled ? " on" : ""}`} onClick={toggleAutoBriefing}><span/>{autoEnabled ? "On" : "Off"}</button></div>
-          <p className="drive-auto-status"><span className={autoEnabled ? "drive-status-dot active" : "drive-status-dot"}/>{autoMessage}</p>
+          {careLoading ? <p className="vehicle-briefing-greeting">Checking saved records…</p> : activeCareCount > 0 ? <p className="vehicle-briefing-greeting">{activeCareCount} {activeCareCount === 1 ? "item" : "items"} to review</p> : null}
+          <div className="vehicle-briefing-play"><div><strong>Hear briefing</strong><span>From your saved records</span></div><button className="drive-briefing-icon" type="button" onClick={() => void playBriefing("manual")} disabled={busy} aria-label="Hear briefing" title="Hear briefing"><Icon name="volume" size={23}/></button></div>
+          <div className="drive-auto-row"><div><strong>Play when driving</strong><small>Uses phone location while this page is open</small></div><button type="button" role="switch" aria-checked={autoEnabled} aria-label="Auto briefing when driving" className={`drive-auto-switch${autoEnabled ? " on" : ""}`} onClick={toggleAutoBriefing}><span/>{autoEnabled ? "On" : "Off"}</button></div>
+          {autoEnabled && <p className="drive-auto-status"><span className="drive-status-dot active"/>{autoMessage}</p>}
           {briefingState !== "idle" && <span className="drive-played-note" aria-live="polite">{briefingState === "loading" ? "Preparing briefing…" : briefingState === "speaking" ? "Speaking now…" : "Briefing played"}</span>}
           </div>
         </section>
-        <section className="driving-insights-card"><div className="driving-insights-heading"><span className="section-overline">PHONE GPS</span><button type="button" onClick={toggleStatusTracking}>{trackingEnabled ? "Stop tracking" : "Start tracking"}</button></div><h2>Driving insights</h2><div className="driving-insights-grid"><div><strong>{miles(driveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway share</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City share</span></div></div><p>{driveSummary.weekTrackedDays ? `Tracked on ${driveSummary.weekTrackedDays} ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} in the past 7 days while location was on.` : trackingEnabled ? "Tracking now. Distance appears once you start driving." : "Start tracking to build this from phone GPS while Carmori is open."} {care?.environment.status === "available" ? `Open-Meteo: ${care.environment.rainfall_mm?.toFixed(1)} mm rain in the past 7 days ${care.environment.area ? `for ${care.environment.area}` : "near your last GPS location"}.` : "Recent weather unavailable."}</p></section>
+        <section className="driving-insights-card"><div className="driving-insights-heading"><h2>Driving insights</h2><button type="button" onClick={toggleStatusTracking}>{trackingEnabled ? "Stop tracking" : "Start tracking"}</button></div><div className="driving-insights-grid"><div><strong>{miles(driveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City</span></div></div><p>{driveSummary.weekTrackedDays ? `${driveSummary.weekTrackedDays} tracked ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} · Phone GPS` : trackingEnabled ? "Tracking with phone GPS" : "Track a drive to see your mileage"}{care?.environment.status === "available" ? ` · 7-day rain: ${care.environment.rainfall_mm?.toFixed(1)} mm (Open-Meteo)` : ""}</p></section>
         <section className="care-section" aria-label="Your care priorities">
-          <div className="care-section-heading"><div><span className="section-overline">PERSONALIZED CARE</span><h2>Your care priorities</h2></div><button type="button" onClick={() => void refreshData()} aria-label="Recalculate care priorities"><Icon name="refresh" size={17}/></button></div>
+          <div className="care-section-heading"><h2>Recommended checks</h2><button type="button" onClick={() => void refreshData()} aria-label="Refresh recommended checks"><Icon name="refresh" size={17}/></button></div>
           {careLoading && <div className="care-loading">Reviewing your vehicle and maintenance history…</div>}
           {!careLoading && !care && <div className="care-loading">Care priorities are unavailable. Use refresh to try again.</div>}
           {!careLoading && care?.recommendations.map((item) => <article className="care-card" key={item.id}>
-            <div className="care-card-top"><span className={`care-card-icon ${item.component}`}><Icon name={item.component === "washer_fluid" ? "washer" : "status"} size={23}/></span><span className={`care-priority ${item.priority.toLowerCase()}`}>{item.priority.replaceAll("_", " ")}</span></div>
+            <div className="care-card-top"><span className={`care-card-icon ${item.component}`}><Icon name={item.component === "washer_fluid" ? "washer" : "status"} size={23}/></span><span className={`care-priority ${item.priority.toLowerCase()}`}>{priorityLabel(item.priority)}</span></div>
             <h3>{item.title}</h3><p>{item.explanation}</p>
-            <div className="care-evidence"><strong>WHY THIS APPEARS</strong>{item.evidence.filter((evidence) => evidence.value !== "Not provided").map((evidence) => <span key={evidence.label}>{evidence.label}: {evidence.value}</span>)}</div>
-            <p className="care-unknown">Still unknown: {item.unknown.join(" · ")}</p>
+            <div className="care-evidence"><strong>Based on</strong>{item.evidence.filter((evidence) => evidence.value !== "Not provided").map((evidence) => <span key={evidence.label}>{evidence.label}: {evidence.value}</span>)}</div>
+            {item.unknown.length > 0 && <p className="care-unknown">Unknown: {item.unknown.join(" · ")}</p>}
             <button className="care-action" type="button" onClick={() => item.suggested_action === "washer_guide" ? void beginTask() : openRecord("tires")} disabled={busy}><span>{item.suggested_action === "washer_guide" ? "Open washer guide" : "Record tire inspection"}</span><Icon name="arrow" size={17}/></button>
           </article>)}
         </section>
@@ -457,10 +491,8 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
       </>}
 
       {!profileOpen && tab === "status" && <>
-        <div className="page-heading"><p className="eyebrow">MY VEHICLE</p><h1>Vehicle status</h1><p>Saved records and phone driving estimates</p></div>
-        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={care} loading={careLoading}/></Suspense>
         <section className="status-mileage-card" aria-label="Driving activity">
-          <div className="status-mileage-heading"><span className="status-mileage-icon"><Icon name="status" size={23}/></span><div><span className="section-overline">DRIVING ACTIVITY</span><h2>Mileage</h2></div><span className="status-mileage-source">PHONE GPS</span></div>
+          <div className="status-mileage-heading"><h2>Mileage</h2><span className="status-mileage-source">Phone GPS</span></div>
           <div className="status-mileage-grid" aria-live="polite">
             <div><span>Today</span><strong>{miles(driveSummary.todayMeters)}</strong><small>Driven distance</small></div>
             <div><span>Typical day</span><strong>{miles(driveSummary.typicalMeters)}</strong><small>Past tracked days</small></div>
@@ -470,31 +502,12 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
           <button className={`status-track-button${trackingEnabled ? " is-tracking" : ""}`} type="button" onClick={toggleStatusTracking}><Icon name={trackingEnabled ? "pause" : "status"} size={18}/>{trackingEnabled ? "Stop drive tracking" : "Start drive tracking"}</button>
           <p className="status-tracking-message" role="status"><span className={trackingEnabled ? "status-tracking-dot active" : "status-tracking-dot"}/>{trackingMessage}</p>
         </section>
-        {tireCare && <section className="status-check-card" id="status-detail-tires" aria-label="Tire status">
-          <div className="status-check-top"><span className="status-check-icon tire"><Icon name="status" size={25}/></span><span className={`status-check-chip${tireCare.priority === "WARNING" ? " warning" : tireCare.priority === "ROUTINE" ? "" : " needs-check"}`}>{tireCare.priority.replaceAll("_", " ")}</span></div>
-          <h2>Tires</h2><p>{tireCare.explanation}</p>
-          <div className="status-check-evidence"><strong>WHY THIS APPEARS</strong>{tireCare.evidence.filter((item) => item.value !== "Not provided").map((item) => <span key={item.label}>{item.label}: {item.value}</span>)}</div>
-          <button className="status-guide-button" type="button" onClick={() => openRecord("tires")}>Record tire inspection <Icon name="arrow" size={18}/></button>
-        </section>}
-        <section className="status-check-card" id="status-detail-washer_fluid" aria-label="Washer fluid status">
-          <div className="status-check-top"><span className="status-check-icon"><Icon name="washer" size={25}/></span><span className={`status-check-chip${shouldCheck ? " needs-check" : ""}`}>{washerCare?.priority.replaceAll("_", " ") ?? "CHECKING"}</span></div>
-          <h2>Washer fluid</h2>
-          <p>{washerCare?.explanation ?? "Reviewing your maintenance records…"}</p>
-          {washerCare && <div className="status-check-evidence"><strong>WHY THIS APPEARS</strong>{washerCare.evidence.filter((item) => item.value !== "Not provided").map((item) => <span key={item.label}>{item.label}: {item.value}</span>)}</div>}
-          <button className="status-guide-button" type="button" onClick={beginTask} disabled={busy}><span>Start guided check</span><Icon name="arrow" size={18}/></button>
-        </section>
-        <section className="status-details-card" aria-label="Available vehicle signals">
-          <h2>What Carmori knows</h2>
-          <div className="status-detail-row"><span className="status-detail-icon"><Icon name="history" size={19}/></span><div><strong>Saved maintenance</strong><small>{memoryLoading ? "Loading records…" : `${records.length} ${records.length === 1 ? "record" : "records"}`}</small></div></div>
-          <div className="status-detail-row"><span className="status-detail-icon"><Icon name="washer" size={19}/></span><div><strong>Fluid level</strong><small>Not measured</small></div></div>
-          <div className="status-detail-row"><span className="status-detail-icon"><Icon name="status" size={19}/></span><div><strong>Dashboard warnings</strong><small>No live vehicle connection</small></div></div>
-        </section>
-        <p className="status-footnote">Carmori needs a camera check or vehicle connection to confirm live conditions.</p>
+        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={care} loading={careLoading}/></Suspense>
+        <ServiceStatus vehicle={vehicle} records={records} care={care} loading={memoryLoading || careLoading} onSaved={refreshData} onTireInspection={() => openRecord("tires")} onWasherGuide={() => void beginTask()} guideBusy={busy}/>
       </>}
 
       {!profileOpen && tab === "assistant" && <>
-        <div className="page-heading"><p className="eyebrow">CARMORI ASSISTANT</p><h1>How can I help?</h1><p>Answers grounded in your car history</p></div>
-        <section className="assistant-hero"><span className="assistant-orb"><Icon name="spark" size={37}/></span><Waveform active={started}/><strong>{started ? "Listening" : "Start a conversation"}</strong><p>{started ? "Ask a question about your car" : "Tap below to turn on the microphone"}</p></section>
+        <section className="assistant-hero"><span className="assistant-orb"><Icon name="mic" size={25}/></span><strong>{started ? "Listening" : "Voice is off"}</strong><p>{started ? "Ask a question about your car" : "Start voice chat to use the microphone"}</p></section>
         <div className="suggestions"><span>Try asking</span><p>“Why check washer fluid?”</p><p>“What did I do earlier?”</p><p>“Where do I add washer fluid?”</p></div>
         <Captions items={captions}/>
         <form className="assistant-compose" onSubmit={(event) => void askTypedQuestion(event)}><input aria-label="Ask Carmori a question" placeholder="Ask about your car…" value={typedQuestion} onChange={(event) => setTypedQuestion(event.target.value)} maxLength={500}/><button type="submit" disabled={asking || !typedQuestion.trim()}>{asking ? "Asking…" : "Ask"}</button></form>
@@ -503,25 +516,29 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
       </>}
 
       {!profileOpen && tab === "guide" && <>
-        <div className="page-heading"><p className="eyebrow">CAR CARE GUIDE</p><h1>Inspect with Carmori</h1><p>Use a camera check and save only work you confirm.</p></div>
         {!tireOpen && <div className="guide-list"><section className="guide-option"><span className="guide-option-icon"><Icon name="inspect" size={22}/></span><div><h2>Washer fluid</h2><p>Locate the inlet, check the product, and follow hands-free steps.</p></div><button type="button" onClick={() => void beginTask()} disabled={busy}>Start washer guide <Icon name="arrow" size={17}/></button></section><section className="guide-option"><span className="guide-option-icon"><Icon name="status" size={22}/></span><div><h2>Tire visual check</h2><p>Photograph a tire and add gauge measurements if you have them.</p></div><button type="button" onClick={() => setTireOpen(true)}>Inspect tire <Icon name="arrow" size={17}/></button></section></div>}
         {tireOpen && vehicle && <TireInspection vehicle={vehicle} onSaved={() => { setTireOpen(false); void refreshData(); goToTab("history"); }} onCancel={() => setTireOpen(false)}/>}
       </>}
 
       {!profileOpen && tab === "history" && <>
-        <div className="page-heading"><p className="eyebrow">VEHICLE MEMORY</p><h1>Your car history</h1><p>Maintenance you logged with Carmori</p></div>
+        <HistorySummary vehicle={vehicle} issues={majorIssues} issuesLoading={issuesLoading} issuesAvailable={issuesAvailable} onEditVehicle={() => setProfileOpen(true)} onVehicleUpdated={setVehicle} onRefresh={refreshData}/>
+        <button className="documents-shortcut" type="button" onClick={openDocuments}><span className="documents-shortcut-icon"><Icon name="file" size={21}/></span><span><strong>Driving documents</strong><small>{documentsError ? "Local storage unavailable" : documentsLoading ? "Checking this device…" : `${savedDocumentCount} of 3 quick-access copies saved`}</small></span><Icon name="chevron" size={18}/></button>
         {recordOpen && vehicle && <RecordForm key={recordComponent} vehicle={vehicle} initialComponent={recordComponent} onSaved={() => { setRecordOpen(false); void refreshData(); }} onCancel={() => setRecordOpen(false)}/>}
-        <section className="history-panel"><div className="history-title"><span className="history-title-icon"><Icon name="history" size={22}/></span><div><h2>Maintenance timeline</h2><p>{records.length} confirmed {records.length === 1 ? "record" : "records"}</p></div></div>
+        <section className="history-panel"><div className="history-title"><span className="history-title-icon"><Icon name="history" size={22}/></span><div><h2>History</h2><p>{records.length} confirmed {records.length === 1 ? "record" : "records"}</p></div></div>
           <button className="history-add-button" type="button" onClick={() => { setRecordComponent("washer_fluid"); setRecordOpen(true); }}>Add completed work <Icon name="arrow" size={16}/></button>
-          <div className="history-filters" role="group" aria-label="Filter maintenance records">{(["all", "washer_fluid", "tires"] as const).map((filter) => <button key={filter} type="button" className={historyFilter === filter ? "selected" : ""} onClick={() => setHistoryFilter(filter)}>{filter === "all" ? "All" : filter === "washer_fluid" ? "Washer" : "Tires"}</button>)}</div>
-          {visibleRecords.length === 0 && <div className="empty-state"><Icon name="history" size={30}/><strong>No matching records yet</strong><p>Only completed work you confirm will be saved here.</p></div>}
-          {visibleRecords.map((record) => <div className="history-record" key={record.record_id}><button className="history-item" type="button" onClick={() => setOpenRecordId(openRecordId === record.record_id ? null : record.record_id)} aria-expanded={openRecordId === record.record_id}><span className="history-item-dot"><Icon name="check" size={14}/></span><div><strong>{record.component === "tires" ? "Tire" : "Washer fluid"} {record.event_type}</strong><p>{new Date(record.completed_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}{record.odometer_km !== null ? ` · ${Math.round(record.odometer_km / 1.609344).toLocaleString()} mi` : ""}</p><span>{SOURCE_LABEL[record.completion_source]}{record.product_label ? ` · ${record.product_label}` : ""}</span></div><Icon name="chevron" size={16}/></button>{openRecordId === record.record_id && <div className="history-detail"><p>{record.notes || "No notes added."}</p>{record.photo_data_url && <img className="history-photo" src={record.photo_data_url} alt="Maintenance photo"/>}<small>{record.user_confirmed ? "User-confirmed completion" : "Camera-observed sequence"}</small></div>}</div>)}
+          <div className="history-view-switch" role="group" aria-label="History view"><button type="button" className={historyView === "list" ? "selected" : ""} onClick={() => setHistoryView("list")}>List</button><button type="button" className={historyView === "calendar" ? "selected" : ""} onClick={() => setHistoryView("calendar")}>Calendar</button></div>
+          {historyView === "calendar" ? <HistoryCalendar records={records} issues={issuesAvailable ? majorIssues : []}/> : <>
+            {records.length === 0 && <div className="empty-state"><Icon name="history" size={30}/><strong>No records yet</strong><p>Only completed work you confirm will be saved here.</p></div>}
+            {records.map((record) => <div className="history-record" key={record.record_id}><button className="history-item" type="button" onClick={() => setOpenRecordId(openRecordId === record.record_id ? null : record.record_id)} aria-expanded={openRecordId === record.record_id}><span className="history-item-dot"><Icon name="check" size={14}/></span><div><strong>{MAINTENANCE_LABELS[record.component] || record.component} {record.event_type}</strong><p>{new Date(record.completed_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}{record.odometer_km !== null ? ` · ${Math.round(record.odometer_km / 1.609344).toLocaleString()} mi` : ""}</p><span>{SOURCE_LABEL[record.completion_source]}{record.product_label ? ` · ${record.product_label}` : ""}</span></div><Icon name="chevron" size={16}/></button>{openRecordId === record.record_id && <div className="history-detail"><p>{record.notes || "No notes added."}</p>{record.photo_data_url && <img className="history-photo" src={record.photo_data_url} alt="Maintenance photo"/>}<small>{record.user_confirmed ? "User-confirmed completion" : "Camera-observed sequence"}</small></div>}</div>)}
+          </>}
         </section>
       </>}
 
-      {error && <div className="inline-error" role="alert">{error}</div>}
+      {!profileOpen && tab === "documents" && <Documents vehicleId={vehicleId} records={documents.filter((record) => record.vehicleId === vehicleId)} storageError={documentsError} onChanged={refreshDocuments} onBack={() => goToTab(documentReturnTabRef.current)}/>}
+
+      {error && tab !== "documents" && <div className="inline-error" role="alert">{error}</div>}
     </main>
-    {!profileOpen && tab !== "assistant" && <button className={`floating-mic${fabHidden ? " is-hidden" : ""}`} type="button" onClick={() => void startVoiceChat()} disabled={busy} aria-label="Ask by voice" aria-hidden={fabHidden} tabIndex={fabHidden ? -1 : 0} title="Ask by voice"><Icon name="mic" size={25}/></button>}
-    <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
+    {!profileOpen && tab !== "assistant" && tab !== "documents" && <button className={`floating-mic${fabHidden ? " is-hidden" : ""}`} type="button" onClick={() => void startVoiceChat()} disabled={busy} aria-label="Ask by voice" aria-hidden={fabHidden} tabIndex={fabHidden ? -1 : 0} title="Ask by voice"><Icon name="mic" size={25}/></button>}
+    <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id || (tab === "documents" && item.id === "history") ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
   </div>;
 }

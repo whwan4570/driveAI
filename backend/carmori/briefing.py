@@ -118,7 +118,11 @@ def render_memory_answer(records: Sequence[MaintenanceRecord], now: datetime) ->
     if last is None:
         return "There is no confirmed maintenance on record yet.", []
     when = last.completed_at.strftime("%b %d, %Y at %H:%M UTC")
-    component = "tire" if last.component == "tires" else "washer fluid"
+    component = {
+        "tires": "tire", "washer_fluid": "washer fluid", "engine_oil": "engine oil",
+        "brake_pads": "brake pad", "cabin_filter": "cabin air filter",
+        "engine_air_filter": "engine air filter",
+    }.get(last.component, last.component.replace("_", " "))
     text = (
         f"A {component} {last.event_type} was logged on {when}, {SOURCE_LABEL[last.completion_source]}. "
         + (f"Your note says: {last.notes}. " if last.notes else "")

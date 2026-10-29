@@ -2,9 +2,11 @@ import { useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
 import { VehiclePicker } from "../components/VehiclePicker";
 import { api, type Vehicle } from "../lib/api";
+import { todayLocalISO } from "../lib/vehicleDates";
 
-export function VehicleEditor({ vehicle, onSaved, onCancel }: {
+export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
   vehicle: Vehicle;
+  hasMajorIssues: boolean;
   onSaved: (updated: Vehicle) => void;
   onCancel: () => void;
 }) {
@@ -13,6 +15,9 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
   const [year, setYear] = useState(String(vehicle.year));
   const [trim, setTrim] = useState(vehicle.trim ?? "");
   const [nickname, setNickname] = useState(vehicle.nickname ?? "");
+  const [purchasedOn, setPurchasedOn] = useState(vehicle.purchased_on ?? "");
+  const [firstDriveOn, setFirstDriveOn] = useState(vehicle.first_drive_on ?? "");
+  const [majorIssueFreeConfirmed, setMajorIssueFreeConfirmed] = useState(vehicle.major_issue_free_confirmed);
   const [exteriorColor, setExteriorColor] = useState(vehicle.exterior_color ?? "");
   const [odometer, setOdometer] = useState(vehicle.odometer_km === null ? "" : String(Math.round(vehicle.odometer_km / 1.609344)));
   const [unit, setUnit] = useState<"mi" | "km">("mi");
@@ -24,12 +29,19 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!make.trim() || !model.trim()) { setError("Choose your vehicle make and model."); return; }
+    if ((purchasedOn && purchasedOn > todayLocalISO()) || (firstDriveOn && firstDriveOn > todayLocalISO()) ||
+        (purchasedOn && firstDriveOn && firstDriveOn < purchasedOn) ||
+        (majorIssueFreeConfirmed && (!purchasedOn || hasMajorIssues))) {
+      setError("Check the purchase date, first-drive date, and major issue history."); return;
+    }
     setSaving(true);
     setError(null);
     try {
       const updated = await api.updateVehicle(vehicle.vehicle_id, {
         year: Number(year), make: make.trim(), model: model.trim(), trim: trim.trim() || null,
         nickname: nickname.trim() || null, exterior_color: exteriorColor.trim(),
+        purchased_on: purchasedOn || null, first_drive_on: firstDriveOn || null,
+        major_issue_free_confirmed: majorIssueFreeConfirmed,
         odometer_km: Math.round(Number(odometer) * (unit === "mi" ? 1.609344 : 1)),
         odometer_updated_at: new Date(`${odometerDate}T12:00:00`).toISOString(),
         region: region.trim() || null,
@@ -48,6 +60,8 @@ export function VehicleEditor({ vehicle, onSaved, onCancel }: {
       <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
       <div className="review-fields"><label>Model year<input type="number" min="1981" max="2035" value={year} onChange={(event) => setYear(event.target.value)} required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(event) => setTrim(event.target.value)} maxLength={60}/></label></div>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
+      <div className="review-fields"><label>Purchase date <span className="optional">optional</span><input type="date" max={todayLocalISO()} value={purchasedOn} onChange={(event) => { setPurchasedOn(event.target.value); setMajorIssueFreeConfirmed(false); }}/></label><label>First drive date <span className="optional">optional</span><input type="date" min={purchasedOn || undefined} max={todayLocalISO()} value={firstDriveOn} onChange={(event) => setFirstDriveOn(event.target.value)}/></label></div>
+      {!hasMajorIssues && <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} disabled={!purchasedOn} onChange={(event) => setMajorIssueFreeConfirmed(event.target.checked)}/><span>No major issues since purchase: accidents, engine or transmission failures, brake or steering failures, or breakdowns requiring a tow. Routine maintenance is excluded.</span></label>}
       <label>Exterior color<input value={exteriorColor} onChange={(event) => setExteriorColor(event.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>
       <p className="form-help">Changing the vehicle or paint color creates a new image automatically.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(event) => setOdometer(event.target.value)} required/></label><label>Unit<select value={unit} onChange={(event) => setUnit(event.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import date
 from typing import Literal, Protocol
 
 import httpx
@@ -13,7 +14,7 @@ from pydantic import BaseModel
 from .config import Settings
 
 ScanMode = Literal["vin", "exterior"]
-DocumentType = Literal["buyers_guide", "odometer_disclosure", "vehicle_history_report", "window_sticker"]
+DocumentType = Literal["bill_of_sale", "buyers_guide", "odometer_disclosure", "vehicle_history_report", "window_sticker"]
 DocumentMime = Literal["image/jpeg", "image/png", "application/pdf"]
 ScanStatus = Literal["recognized", "unrecognized", "unavailable"]
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
@@ -29,6 +30,7 @@ class VehicleScanResult(BaseModel):
     exterior_color: str | None = None
     vin_last4: str | None = None
     document_type: DocumentType | None = None
+    sale_date: date | None = None
     message: str
 
 
@@ -57,6 +59,16 @@ def clean_year(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return year if 1981 <= year <= 2035 else None
+
+
+def clean_sale_date(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if date(1981, 1, 1) <= parsed <= date.today() else None
 
 
 def clean_exterior_color(value: object) -> str | None:
@@ -180,20 +192,25 @@ class MetaVehicleRecognizer:
         if not self.settings.meta_api_key:
             return VehicleScanResult(status="unavailable", source="document", document_type=document_type, message="Document reading needs a Meta API key. You can enter the vehicle manually.")
         labels = {
+            "bill_of_sale": "Bill of Sale or Purchase Agreement",
             "buyers_guide": "Buyers Guide",
             "odometer_disclosure": "Odometer Disclosure Statement",
             "vehicle_history_report": "Vehicle History Report",
             "window_sticker": "Window Sticker / Monroney Sticker",
         }
+        has_sale_date = document_type in {"bill_of_sale", "odometer_disclosure"}
         prompt = (
             f"This is a vehicle purchase document identified as {labels[document_type]}. "
-            "Extract only the printed vehicle identity. Return only a JSON object with keys "
-            '{"make": null, "model": null, "year": null, "vin": null, "exterior_color": null}. '
+            "Extract only the printed vehicle identity and, when applicable, the sale date. Return only a JSON object with keys "
+            '{"make": null, "model": null, "year": null, "vin": null, "exterior_color": null, "sale_date": null}. '
             "Replace null only when the value is explicitly printed. Use the model year only if labeled; never use a report date as model year. "
-            "Extract the exterior paint color only if explicitly printed. Do not guess missing details. Do not return owner names, addresses, prices, or other personal information."
+            "Extract the exterior paint color only if explicitly printed. "
+            + ("Use sale_date only for an explicit date of sale or transfer, formatted YYYY-MM-DD. Never use document print, report, inspection, or previous-owner dates. " if has_sale_date else "Always leave sale_date null for this document type. ")
+            + "Do not guess missing details. Do not return owner names, addresses, prices, or other personal information."
         )
         try:
             parsed = await self._document_json(data, mime, prompt)
+            sale_date = clean_sale_date(parsed.get("sale_date")) if has_sale_date else None
             vin = clean_vin(parsed.get("vin"))
             if vin:
                 try:
@@ -204,6 +221,7 @@ class MetaVehicleRecognizer:
                     return decoded.model_copy(update={
                         "source": "document", "document_type": document_type,
                         "exterior_color": clean_exterior_color(parsed.get("exterior_color")),
+                        "sale_date": sale_date,
                         "message": "VIN from the document was decoded. Confirm your vehicle before continuing.",
                     })
             make, model, year = clean_name(parsed.get("make")), clean_name(parsed.get("model")), clean_year(parsed.get("year"))
@@ -213,6 +231,7 @@ class MetaVehicleRecognizer:
                 status="recognized", source="document", document_type=document_type,
                 make=make, model=model, year=year, vin_last4=vin[-4:] if vin else None,
                 exterior_color=clean_exterior_color(parsed.get("exterior_color")),
+                sale_date=sale_date,
                 message="Vehicle details were read from the document. Confirm them before continuing.",
             )
         except httpx.HTTPStatusError as exc:

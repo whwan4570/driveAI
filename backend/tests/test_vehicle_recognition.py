@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 
 import httpx
 
@@ -81,3 +82,26 @@ def test_meta_reads_pdf_inline_and_returns_only_vehicle_identity(monkeypatch):
     assert result.status == "recognized"
     assert result.source == "document"
     assert (result.make, result.model, result.year) == ("Ford", "Focus", 2018)
+
+
+def test_bill_of_sale_date_is_candidate_but_window_sticker_date_is_ignored(monkeypatch):
+    real_client = httpx.AsyncClient
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        prompt = body["messages"][0]["content"][0]["text"]
+        if "Bill of Sale" in prompt:
+            assert "explicit date of sale" in prompt
+        else:
+            assert "Always leave sale_date null" in prompt
+        return httpx.Response(200, json={"choices": [{"message": {"content":
+            '{"make":"Honda","model":"Civic","year":2021,"sale_date":"2024-04-15"}'}}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: real_client(
+        *args, transport=httpx.MockTransport(handle), **kwargs,
+    ))
+    recognizer = MetaVehicleRecognizer(Settings(meta_api_key="test-key"))
+    sale = asyncio.run(recognizer.recognize_document(b"%PDF-1.7\nexample", "application/pdf", "bill_of_sale"))
+    sticker = asyncio.run(recognizer.recognize_document(b"%PDF-1.7\nexample", "application/pdf", "window_sticker"))
+    assert sale.sale_date == date(2024, 4, 15)
+    assert sticker.sale_date is None

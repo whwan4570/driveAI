@@ -3,9 +3,11 @@ import { Icon } from "../components/Icons";
 import { VehiclePicker } from "../components/VehiclePicker";
 import { api, type DocumentType, type VehicleScanResult, type VehicleSpecView } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
+import { todayLocalISO } from "../lib/vehicleDates";
 
 type ScanMode = "vin" | "exterior" | "document";
 const DOCUMENTS: { id: DocumentType; label: string }[] = [
+  { id: "bill_of_sale", label: "Bill of Sale / Purchase Agreement" },
   { id: "buyers_guide", label: "Buyers Guide" },
   { id: "odometer_disclosure", label: "Odometer Disclosure Statement" },
   { id: "vehicle_history_report", label: "Vehicle History Report" },
@@ -31,12 +33,15 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
   const [model, setModel] = useState("");
   const [trim, setTrim] = useState("");
   const [nickname, setNickname] = useState("");
+  const [purchasedOn, setPurchasedOn] = useState("");
+  const [firstDriveOn, setFirstDriveOn] = useState("");
+  const [majorIssueFreeConfirmed, setMajorIssueFreeConfirmed] = useState(false);
   const [exteriorColor, setExteriorColor] = useState("");
   const [odometer, setOdometer] = useState("");
   const [odometerUnit, setOdometerUnit] = useState<"mi" | "km">("mi");
   const [odometerDate, setOdometerDate] = useState("");
   const [mode, setMode] = useState<ScanMode>("vin");
-  const [documentType, setDocumentType] = useState<DocumentType>("buyers_guide");
+  const [documentType, setDocumentType] = useState<DocumentType>("bill_of_sale");
   const [documentName, setDocumentName] = useState("");
   const [readingDocument, setReadingDocument] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -124,6 +129,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       setTrim(result.trim ?? "");
       setYear(result.year ?? "");
       setExteriorColor(result.exterior_color ?? "");
+      if (result.sale_date) setPurchasedOn(result.sale_date);
     } catch {
       setError("The document could not be read. Try another image or enter your car manually.");
     } finally {
@@ -141,6 +147,13 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       setError("Add your vehicle, exterior color, and odometer before continuing.");
       return;
     }
+    if ((firstDriveOn && purchasedOn && firstDriveOn < purchasedOn) ||
+        (purchasedOn && purchasedOn > todayLocalISO()) ||
+        (firstDriveOn && firstDriveOn > todayLocalISO()) ||
+        (majorIssueFreeConfirmed && !purchasedOn)) {
+      setError("Check the purchase and first-drive dates before continuing.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -149,6 +162,8 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
         year,
         make: make.trim(), model: model.trim(), trim: trim.trim() || undefined,
         nickname: nickname.trim() || undefined, exterior_color: exteriorColor.trim(),
+        purchased_on: purchasedOn || null, first_drive_on: firstDriveOn || null,
+        major_issue_free_confirmed: majorIssueFreeConfirmed,
         odometer_km: Math.round(mileage * (odometerUnit === "mi" ? 1.609344 : 1)),
         odometer_updated_at: new Date(`${odometerDate}T12:00:00`).toISOString(),
         profile_source: scanResult?.source === "document" ? "document" : scanResult ? "scan" : "manual",
@@ -192,19 +207,19 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
 
   return <div className="app-shell"><main className="screen setup-screen">
     <header className="topbar"><div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div></header>
-    <div className="setup-hero scan-hero"><span className="setup-hero-icon"><Icon name="spark" size={34}/></span><p className="eyebrow">YOUR DRIVE, REMEMBERED</p><h1>Let's meet your car</h1><p>Scan your car or use a document from when you bought it.</p></div>
+    <div className="setup-hero scan-hero"><p className="eyebrow">YOUR DRIVE, REMEMBERED</p><h1>Add your car</h1><p>Scan a VIN, photograph your car, or add details manually.</p></div>
 
     {!manual && !scanResult && <section className="scan-panel">
-      <div className="scan-panel-heading"><span className="scan-panel-icon"><Icon name="camera" size={23}/></span><div><h2>Identify your vehicle</h2><p>Choose the source you have nearby</p></div></div>
+      <div className="scan-panel-heading"><h2>Choose a source</h2></div>
       <div className="scan-modes three" role="group" aria-label="Scan method">
         <button type="button" className={mode === "vin" ? "selected" : ""} onClick={() => { setMode("vin"); setError(null); }}>VIN plate</button>
         <button type="button" className={mode === "exterior" ? "selected" : ""} onClick={() => { setMode("exterior"); setError(null); }}>Car exterior</button>
         <button type="button" className={mode === "document" ? "selected" : ""} onClick={() => { setMode("document"); setCameraOpen(false); setError(null); }}>Documents</button>
       </div>
       {mode === "document" ? <div className="document-source">
-        <p className="document-caption">PURCHASE PAPERWORK</p>
+        <p className="document-caption">Purchase document</p>
         <div className="document-options" role="group" aria-label="Document type">{DOCUMENTS.map((item) => <button key={item.id} type="button" className={documentType === item.id ? "selected" : ""} onClick={() => setDocumentType(item.id)}>{item.label}</button>)}</div>
-        <div className="document-upload-illustration"><Icon name="history" size={39}/><strong>Find your car in the paperwork</strong><span>Photo, JPG, PNG or PDF · up to 8 MB</span></div>
+        <div className="document-upload-illustration"><Icon name="history" size={30}/><strong>Use a document you already have</strong><span>Photo, JPG, PNG or PDF · up to 8 MB</span></div>
         <p className="scan-help">The file goes to Meta for one-time reading. Carmori saves confirmed vehicle details, not the document.</p>
         <input ref={photoInputRef} type="file" accept="image/jpeg,image/png" capture="environment" hidden onChange={(event) => { void readDocument(event.target.files?.[0]); event.target.value = ""; }}/>
         <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" hidden onChange={(event) => { void readDocument(event.target.files?.[0]); event.target.value = ""; }}/>
@@ -223,12 +238,15 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     </section>}
 
     {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
-      {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}</p></>
+      {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}{scanResult.sale_date ? " Confirm the suggested sale date is when you bought this car." : ""}</p></>
         : <><h2>Vehicle details</h2><p className="review-note">Add your car to personalize care suggestions.</p></>}
       <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
       {specs.length > 1 && <label>Vehicle guide<select value={specId} onChange={(e) => setSpecId(e.target.value)}>{specs.map((s) => <option key={s.spec_id} value={s.spec_id}>{s.display_name}</option>)}</select></label>}
       <div className="review-fields"><label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(e) => setTrim(e.target.value)} maxLength={60} placeholder="e.g. EX"/></label></div>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
+      <div className="review-fields"><label>Purchase date <span className="optional">optional</span><input type="date" max={todayLocalISO()} value={purchasedOn} onChange={(e) => { setPurchasedOn(e.target.value); setMajorIssueFreeConfirmed(false); }}/></label><label>First drive date <span className="optional">optional</span><input type="date" min={purchasedOn || undefined} max={todayLocalISO()} value={firstDriveOn} onChange={(e) => setFirstDriveOn(e.target.value)}/></label></div>
+      <p className="form-help">A sale date may be on your bill of sale or odometer disclosure. Enter when you first drove this car separately.</p>
+      <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} disabled={!purchasedOn} onChange={(e) => setMajorIssueFreeConfirmed(e.target.checked)}/><span>No major issues since purchase. This includes accidents, engine or transmission failures, brake or steering failures, and breakdowns requiring a tow. Routine maintenance is excluded.</span></label>
       <label>Exterior color<input value={exteriorColor} onChange={(e) => setExteriorColor(e.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>
       <p className="review-note">Carmori creates your vehicle image automatically from these confirmed details.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="Current reading" required/></label><label>Unit<select value={odometerUnit} onChange={(e) => setOdometerUnit(e.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>

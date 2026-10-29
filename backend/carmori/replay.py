@@ -5,6 +5,7 @@
 
     python -m carmori.replay ../fixtures/clips
     python -m carmori.replay ../fixtures/clips/normal_observed.json -v
+    python -m carmori.replay ../fixtures/clips/recorded   # 실차 클립은 폴더를 직접 지정
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +49,8 @@ class Clip(BaseModel):
     name: str
     description: str = ""
     source: str = "synthetic"  # synthetic | recorded
+    # annotate.py가 남기는 모델·추론 수준·ROI. 합성 클립에는 없다.
+    annotation: dict[str, Any] | None = None
     spec_id: str = DEMO_SPEC.spec_id
     expect: ClipExpect
     events: list[ClipEvent]
@@ -167,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{mark}  {r.clip.name:<32} final={r.final_step.value:<16} records={records:<22} rejected={rejected}")
         for failure in r.failures:
             print(f"      ! {failure}")
+        if args.verbose and r.clip.annotation:
+            meta = r.clip.annotation
+            print(f"      model={meta.get('model')} effort={meta.get('reasoning_effort')} roi={meta.get('roi')}")
         if args.verbose:
             for t, a, b, reason in r.transitions:
                 print(f"      t={t:>5.1f}s  {a.value} -> {b.value}  ({reason})")
