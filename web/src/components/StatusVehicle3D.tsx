@@ -41,11 +41,13 @@ function concernSeverity(priority: CareRecommendation["priority"]): Concern["sev
   return null;
 }
 
-export function StatusVehicle3D({ vehicle, care, loading, samplePreview = false }: {
+export function StatusVehicle3D({ vehicle, care, loading, samplePreview = false, showHeader = true }: {
   vehicle: Vehicle | null;
   care: CareResponse | null;
   loading: boolean;
   samplePreview?: boolean;
+  /** The Status page already shows the car name and review count above this card. */
+  showHeader?: boolean;
 }) {
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const [selected, setSelected] = useState<Concern | null>(null);
@@ -125,10 +127,10 @@ export function StatusVehicle3D({ vehicle, care, loading, samplePreview = false 
   }, createElement("span", { className: "vehicle-hotspot-core" })));
 
   return <section className="status-3d-card" aria-label="Interactive vehicle status">
-    <div className="status-3d-header">
+    {showHeader && <div className="status-3d-header">
       <div><h2>{vehicle?.nickname || [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "My vehicle"}</h2><p>{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p></div>
       <span className={`status-health-light ${severity}`} role="status"><span className="status-health-led"/>{severity === "clear" ? "No flagged items" : severity === "unknown" ? "Checking" : severity === "warning" && concerns.every((concern) => concern.severity === "warning") ? `${concerns.length} warning${concerns.length === 1 ? "" : "s"}` : `${concerns.length} to review`}</span>
-    </div>
+    </div>}
     <div className="status-model-stage">
       {createElement("model-viewer", {
         key: `status-3d-framing-v6:${modelSrc}`,

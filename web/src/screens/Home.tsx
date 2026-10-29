@@ -311,6 +311,11 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     requestAnimationFrame(() => requestAnimationFrame(() => setMenuOpen(true)));
   };
 
+  const openSettings = () => {
+    openMenu();
+    setMenuView("settings");
+  };
+
   const closeMenu = () => {
     setMenuOpen(false);
     if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
@@ -628,6 +633,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const shownStatusCare = samplePreview ? sampleStatusCare(care) : care;
   const weekHighway = shownDriveSummary.weekMeters ? Math.round((shownDriveSummary.weekHighwayMeters / shownDriveSummary.weekMeters) * 100) : null;
   const activeCareCount = care?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
+  const statusReviewCount = shownStatusCare?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
   const notificationItems = (care?.recommendations.filter((item) => item.priority !== "ROUTINE") ?? [])
     .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
   const documentAlerts = documents.filter((record) => record.vehicleId === vehicleId).flatMap((record) => {
@@ -649,7 +655,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   ];
 
   return <div className={`app-shell${keyboardOffset !== null ? " assistant-keyboard-open" : ""}`}>
-    <main className={`screen home-screen${tab === "assistant" ? " assistant-screen" : ""}${tab === "home" && !profileOpen ? " is-k-home" : ""}`}>
+    <main className={`screen home-screen${tab === "assistant" ? " assistant-screen" : ""}${(tab === "home" || tab === "status") && !profileOpen ? " is-k-home" : ""}`}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div>
         <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">{demoMode ? "Demo Mode" : "Sample vehicle"}</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={20}/>{notificationItems.length + documentAlerts.length > 0 && <span className="topbar-alert-count">{notificationItems.length + documentAlerts.length}</span>}</button><button ref={menuButtonRef} className="profile-button" type="button" onClick={openMenu} aria-label="Open menu" aria-expanded={menuOpen} aria-controls="carmori-side-menu" title="Menu"><Icon name="menu" size={22}/></button></div>
@@ -708,20 +714,29 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
         </section> : null}
       </div>}
 
-      {!profileOpen && tab === "status" && <>
-        <section className="status-mileage-card" aria-label="Driving activity">
-          <div className="status-mileage-heading"><h2>Mileage</h2><span className="status-mileage-source">{samplePreview ? "Sample data" : "Phone GPS"}</span></div>
-          <div className="status-mileage-grid" aria-live="polite">
-            <div><span>Today</span><strong>{miles(shownDriveSummary.todayMeters)}</strong><small>Driven distance</small></div>
-            <div><span>Typical day</span><strong>{miles(shownDriveSummary.typicalMeters)}</strong><small>Past tracked days</small></div>
-            <div><span>Speed now</span><strong>{mph(shownDriveSummary.speedMps)}</strong><small>Current estimate</small></div>
-          </div>
-          <p className="status-mileage-help">{samplePreview ? "Sample distances and speed for layout review. Your saved drives are unchanged." : `${driveSummary.trackedDays ? `Typical day averages ${driveSummary.trackedDays} tracked ${driveSummary.trackedDays === 1 ? "day" : "days"} in the past 30 days.` : "Typical day appears after a previous day has been tracked."} Distance and speed are phone estimates while tracking is on.`}</p>
-          <p className="status-tracking-message" role="status"><span className={trackingEnabled ? "status-tracking-dot active" : "status-tracking-dot"}/>{samplePreview ? "Sample preview · Tracking is off" : trackingMessage}</p>
-        </section>
-        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={shownStatusCare} loading={careLoading} samplePreview={samplePreview}/></Suspense>
+      {!profileOpen && tab === "status" && <div className="k-home k-status">
+        <header className="k-hero">
+          <p className="k-eyebrow">{vehicle?.nickname || vehicleName(vehicle)}{vehicle?.odometer_km == null ? "" : ` · ${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p>
+          <h1 className="k-title">Status</h1>
+          <p className="k-lead">{careLoading ? "Checking saved records…" : statusReviewCount > 0 ? <><b>{statusReviewCount} {statusReviewCount === 1 ? "item" : "items"}</b> to review</> : "Nothing flagged in your saved records"}</p>
+        </header>
+        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={shownStatusCare} loading={careLoading} samplePreview={samplePreview} showHeader={false}/></Suspense>
         <ServiceStatus vehicle={vehicle} records={records} care={shownStatusCare} loading={memoryLoading || careLoading} onSaved={refreshData} onTireInspection={() => openRecord("tires")} onWasherGuide={() => void beginTask()} guideBusy={busy} samplePreview={samplePreview}/>
-      </>}
+        <section className="k-block" aria-label="Mileage">
+          <div className="k-block-title"><h2 className="k-h2">Mileage</h2>{samplePreview && <span className="k-badge">Sample data</span>}</div>
+          {samplePreview || trackingEnabled || shownDriveSummary.todayMeters !== null || shownDriveSummary.typicalMeters !== null ? <>
+            <div className="k-facts" aria-live="polite">
+              <div><b>{miles(shownDriveSummary.todayMeters)}</b><span>Today</span></div>
+              <div><b>{miles(shownDriveSummary.typicalMeters)}</b><span>Typical day</span></div>
+              <div><b>{mph(shownDriveSummary.speedMps)}</b><span>Speed now</span></div>
+            </div>
+            <p className="k-note">{samplePreview ? "Sample distances and speed. Your saved drives are unchanged." : trackingEnabled ? trackingMessage : driveSummary.trackedDays ? `Typical day averages ${driveSummary.trackedDays} tracked ${driveSummary.trackedDays === 1 ? "day" : "days"} in the past 30 days.` : "Typical day appears after a previous day is tracked."}</p>
+          </> : <div className="k-empty-row">
+            <p>Drive tracking is off.</p>
+            <button className="k-block-link" type="button" onClick={openSettings}>Turn on in Settings<Icon name="chevron" size={14}/></button>
+          </div>}
+        </section>
+      </div>}
 
       {!profileOpen && tab === "places" && <Places key={vehicleId} vehicleId={vehicleId} care={care} onAskMuse={askMuseToShop}/>}
 

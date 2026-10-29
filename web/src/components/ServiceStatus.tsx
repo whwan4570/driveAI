@@ -7,6 +7,8 @@ import { SAMPLE_SERVICE_REMAINING } from "../lib/statusPreview";
 
 type StatusComponent = ServiceComponent | "washer_fluid";
 type Tone = "unknown" | "good" | "soon" | "due";
+// Same badge table as Home: red due, orange soon, blue needs info, green on track, gray no estimate.
+const BADGE: Record<string, string> = { Warning: "is-danger", Due: "is-danger", "Check soon": "is-warning", "Needs info": "is-info", "On track": "is-success", "No estimate": "" };
 const STATUS_COMPONENTS: { id: StatusComponent; label: string; short: string }[] = [
   ...SERVICE_COMPONENTS,
   { id: "washer_fluid", label: "Washer fluid", short: "Fluid" },
@@ -124,7 +126,8 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
     const tone: Tone = recommendation?.priority === "WARNING" || (percent !== null && percent <= 15) ? "due"
       : recommendation?.priority === "CHECK_SOON" || (percent !== null && percent <= 35) ? "soon"
       : recommendation?.priority === "ROUTINE" || percent !== null ? "good" : "unknown";
-    const label = recommendation?.priority === "WARNING" ? "Warning" : tone === "due" ? "Due" : tone === "soon" ? "Check soon" : tone === "good" ? "On track" : "No estimate";
+    const label = recommendation?.priority === "WARNING" ? "Warning" : tone === "due" ? "Due" : tone === "soon" ? "Check soon" : tone === "good" ? "On track"
+      : recommendation?.priority === "INFORMATION_NEEDED" ? "Needs info" : "No estimate";
     return { record, inspection, interval, percent, recommendation, manualItem, tone, label };
   };
 
@@ -132,13 +135,13 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
   const detail = selected ? rowData(selected) : null;
 
   return <section className="service-status-card" aria-label="Service interval status">
-    <div className="service-status-heading"><h2>Service intervals</h2><p>{samplePreview ? "Sample estimates for screen review. Your records are unchanged." : "Percentages need a dated service record and an interval."}</p></div>
+    <div className="k-block-head"><h2 className="k-h2">Service</h2></div>
     {manual && <div className="service-status-manual"><span>{vehicle?.make} manual · {manual.title}{manualStatus?.status === "ready" ? " · Saved for quick access" : manualStatus?.status === "downloading" ? " · Saving…" : ""}</span><a href={manualStatus?.status === "ready" && vehicle ? api.ownerManualUrl(vehicle.vehicle_id) : manual.sourceUrl} target="_blank" rel="noopener noreferrer">{manualStatus?.status === "ready" ? "Open saved manual ↗" : "View manual schedule ↗"}</a>{manualStatus?.status === "failed" && vehicle && <button type="button" onClick={() => { void api.retryOwnerManual(vehicle.vehicle_id).then(setManualStatus).catch(() => setManualStatus(null)); }}>Retry download</button>}</div>}
     {!manual && vehicle?.make && vehicle?.model && <p className="service-status-note">No verified owner manual is indexed for this exact vehicle yet.</p>}
     {!manual && vehicle?.year === 2021 && vehicle.make?.toLowerCase() === "honda" && vehicle.model?.toLowerCase().includes("civic") && <div className="service-status-manual"><span>Official schedule for this Civic version is not loaded yet.</span></div>}
     <div className="service-status-list">
       {STATUS_COMPONENTS.map(({ id, label, short }) => {
-        const { record, inspection, percent, recommendation, manualItem, tone, label: statusLabel } = rowData(id);
+        const { record, inspection, percent, recommendation, tone, label: statusLabel } = rowData(id);
         const washerRefill = id === "washer_fluid" ? records.filter((entry) => entry.component === id && entry.event_type === "refill" && entry.user_confirmed)
           .sort((a, b) => b.completed_at.localeCompare(a.completed_at))[0] ?? null : null;
         const subtitle = samplePreview ? (id === "washer_fluid" ? "Check level directly" : "Review sample interval")
@@ -151,12 +154,10 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
         const historyLine = samplePreview ? "Sample data · not your service history" : id === "washer_fluid" ? `Last refill: ${lastDate || "unknown"} · Level not measured`
           : id === "brake_pads" || id === "tires" ? inspection ? `Last inspected: ${lastDate}` : record ? `Last changed: ${lastDate}` : "Last inspected: unknown"
           : `Last changed: ${record ? lastDate : "unknown"}`;
-        const sourceLine = !samplePreview ? ` · Manual: ${manualItem?.code || "not loaded"}` : "";
         return <div className="service-status-row" key={id}>
           <button id={`status-detail-${id}`} type="button" className="service-status-trigger" onClick={() => { setSelected(id); setEditing(null); setError(null); }} aria-label={`${label}: ${statusLabel}. View details`} aria-haspopup="dialog">
             <span className="service-status-code">{short}</span>
-            <span className="service-status-copy"><strong>{label}</strong><small>{loading ? "Checking records…" : subtitle}</small><em>{loading ? "" : `${historyLine}${sourceLine}`}</em></span>
-            <span className={`service-status-light ${tone}`} aria-hidden="true"/>
+            <span className="service-status-copy">{!loading && statusLabel !== "No estimate" && <span className={`k-badge ${BADGE[statusLabel]}`}>{statusLabel}</span>}<strong>{label}</strong><small>{loading ? "Checking records…" : subtitle}</small>{!loading && (samplePreview || lastDate) && <em>{historyLine}</em>}</span>
             <span className={`service-status-value ${tone}`}>{loading || percent === null ? "—" : `${percent}%`}</span>
             <Icon name="chevron" size={15}/>
           </button>
@@ -164,7 +165,7 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
         </div>;
       })}
     </div>
-    <p className="service-status-note">{samplePreview ? "Sample percentages show how the indicators look. They are not vehicle condition or service advice." : isHondaMinder ? "Honda's Minder codes are service prompts, not separate part-life percentages. Estimates show schedule progress, not measured condition." : "Manual schedules are service prompts. Percentages show schedule progress, not measured condition."}</p>
+    <p className="k-info service-status-footnote">{samplePreview ? "Sample percentages show how the indicators look. They are not vehicle condition or service advice." : isHondaMinder ? "Honda's Minder codes are service prompts, not separate part-life percentages. Estimates show schedule progress, not measured condition." : "Manual schedules are service prompts. Percentages show schedule progress, not measured condition."}</p>
     {selectedItem && detail && <div className="service-status-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setEditing(null); } }}>
       <div className="service-status-dialog" role="dialog" aria-modal="true" aria-labelledby="service-status-dialog-title">
         <div className="service-status-dialog-top"><div><span className={`service-status-dialog-light ${detail.tone}`}/><span className="service-status-dialog-state">{detail.label}</span></div><button type="button" onClick={() => { setSelected(null); setEditing(null); }} aria-label="Close details">×</button></div>

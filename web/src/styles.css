@@ -604,7 +604,7 @@ h2,h1,p{overflow-wrap:break-word}
 .shop-disclosure{margin:10px 1px 0;color:#899ba4;font-size:10px;line-height:1.4}
 
 /* k-style screens (Home, Add your car): gray page with white blocks, large title, 64px rows. */
-:root{--k-bg:#f2f4f6;--k-surface:#fff;--k-text-1:#191f28;--k-text-2:#4e5968;--k-text-3:#6b7684;--k-brand:#087f89;--k-brand-text:#066e77;--k-brand-tint:#e6f4f5;--k-warning:#b94100;--k-warning-tint:#fff4e5;--k-info:#1f62d6;--k-info-tint:#e8f1ff;--k-danger:#c83323;--k-danger-tint:#fbf1ef;--k-page-x:20px;--k-pad:20px;--k-row-h:64px;--k-r-s:8px;--k-r-m:12px;--k-r-l:16px}
+:root{--k-bg:#f2f4f6;--k-surface:#fff;--k-text-1:#191f28;--k-text-2:#4e5968;--k-text-3:#6b7684;--k-brand:#087f89;--k-brand-text:#066e77;--k-brand-tint:#e6f4f5;--k-warning:#b94100;--k-warning-tint:#fff4e5;--k-info:#1f62d6;--k-info-tint:#e8f1ff;--k-danger:#c83323;--k-danger-tint:#fbf1ef;--k-success:#137b5e;--k-success-tint:#e6f8f3;--k-page-x:20px;--k-pad:20px;--k-row-h:64px;--k-r-s:8px;--k-r-m:12px;--k-r-l:16px}
 .home-screen.is-k-home{background:var(--k-bg);padding-bottom:calc(152px + env(safe-area-inset-bottom))}
 .k-home,.k-page{margin:0 -20px;display:flex;flex-direction:column;gap:12px;color:var(--k-text-1)}
 .k-hero{padding:4px var(--k-page-x) 8px}
@@ -617,10 +617,9 @@ h2,h1,p{overflow-wrap:break-word}
 .k-block-head{display:flex;align-items:center;justify-content:space-between;padding:12px var(--k-pad) 4px}
 .k-h2{margin:0;font-size:20px;line-height:1.4;font-weight:700;letter-spacing:-.01em}
 .k-block-link{display:flex;align-items:center;gap:2px;border:0;background:none;padding:6px 0;color:var(--k-text-3);font:inherit;font-size:14px}
-.k-photo{position:relative;aspect-ratio:16/9;border-radius:var(--k-r-l);overflow:hidden;background:#eef1f4;display:grid;place-items:center}
+.k-photo{position:relative;aspect-ratio:16/9;border-radius:var(--k-r-l);overflow:hidden;background:var(--k-surface);display:grid;place-items:center}
 .k-photo .vehicle-photo{width:100%;height:100%;object-fit:contain}
-.k-photo .vehicle-photo.is-generated{object-fit:cover}
-.k-photo .vehicle-photo-label{right:10px;bottom:8px;padding:2px 8px;border-radius:999px;background:#ffffffd9;color:var(--k-text-3);font-size:11px;font-weight:500}
+.k-photo .vehicle-photo-label{right:10px;bottom:8px;padding:2px 8px;border-radius:999px;background:var(--k-bg);color:var(--k-text-3);font-size:11px;font-weight:500}
 .k-photo .vehicle-photo-empty{height:100%;border:0;border-radius:0;background:transparent;color:var(--k-text-3)}
 .k-photo .vehicle-photo-empty span{font-size:13px;font-weight:600}
 .k-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
@@ -664,3 +663,30 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .k-btn.primary{background:var(--k-brand);color:#fff}
 .k-btn.primary:active{background:#066e77}
 .k-btn.secondary{background:var(--k-surface);color:var(--k-text-1);box-shadow:inset 0 0 0 1px #d1d6db}
+.k-badge.is-success{background:var(--k-success-tint);color:var(--k-success)}
+.k-block-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.k-block-title .k-badge{margin:0}
+.k-note{margin:12px 0 0;color:var(--k-text-3);font-size:13px;line-height:1.5}
+.k-empty-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}
+.k-empty-row p{margin:0;color:var(--k-text-2);font-size:14px}
+.k-empty-row .k-block-link{color:var(--k-brand-text);font-weight:600}
+/* Status tab: 3D view and service list as plain white blocks. */
+.k-status .status-3d-card{margin:0;border:0;border-radius:0;background:var(--k-surface);box-shadow:none}
+.k-status .status-3d-disclaimer{padding:0 var(--k-pad) 14px;color:var(--k-text-3);font-size:12px}
+.k-status .service-status-card{margin:0;padding:8px 0;border:0;border-radius:0;background:var(--k-surface);color:var(--k-text-1)}
+.k-status .service-status-manual{margin:4px var(--k-pad) 8px;padding:10px 12px;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-2);font-size:13px}
+.k-status .service-status-manual a{color:var(--k-brand-text)}
+.k-status .service-status-note{margin:4px var(--k-pad) 8px;color:var(--k-text-3);font-size:13px}
+.k-status .service-status-row{padding:0;border:0}
+.k-status .service-status-trigger{gap:14px;min-height:var(--k-row-h);padding:14px var(--k-pad)}
+.k-status .service-status-trigger:active{background:var(--k-bg)}
+.k-status .service-status-code{width:44px;height:44px;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-2);font-size:11px;font-weight:700}
+.k-status .service-status-copy{gap:0;align-items:flex-start}
+.k-status .service-status-copy strong{font-size:16px;font-weight:600;line-height:1.4}
+.k-status .service-status-copy small{margin-top:2px;color:var(--k-text-2);font-size:14px;line-height:1.4}
+.k-status .service-status-copy em{margin-top:2px;color:var(--k-text-3);font-size:12px;line-height:1.4}
+.k-status .service-status-value{min-width:40px;font-size:15px;font-weight:700}
+.k-status .service-status-value.unknown{color:#b0b8c1}
+.k-status .service-status-trigger>svg{color:#b0b8c1}
+.k-status .service-status-track{height:6px;margin:-4px var(--k-pad) 12px calc(var(--k-pad) + 58px);background:var(--k-bg)}
+.k-status .service-status-footnote{margin:8px 0 6px}
