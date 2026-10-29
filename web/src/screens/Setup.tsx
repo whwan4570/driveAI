@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Icon } from "../components/Icons";
+import { Icon, type IconName } from "../components/Icons";
 import { VehiclePicker } from "../components/VehiclePicker";
 import { VehicleConfigurationFields, inferredCivicBodyStyle, isCivic, type BodyStyle } from "../components/VehicleConfigurationFields";
 import { api, type DocumentType, type VehicleScanResult, type VehicleSpecView } from "../lib/api";
@@ -7,6 +7,11 @@ import { FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
 import { todayLocalISO } from "../lib/vehicleDates";
 
 type ScanMode = "vin" | "exterior" | "document";
+const METHODS: { id: ScanMode; icon: IconName; title: string; detail: string; lead: string }[] = [
+  { id: "vin", icon: "inspect", title: "Scan the VIN plate", detail: "Fastest · reads year, make and model", lead: "It's on the dashboard at the base of the windshield, driver's side." },
+  { id: "exterior", icon: "car", title: "Photograph your car", detail: "Suggests make and model", lead: "Show the front or rear with the badge visible. You will add the model year." },
+  { id: "document", icon: "file", title: "Upload a document", detail: "Bill of sale, buyers guide, or window sticker", lead: "Use a photo, JPG, PNG or PDF up to 8 MB." },
+];
 const DOCUMENTS: { id: DocumentType; label: string }[] = [
   { id: "bill_of_sale", label: "Bill of Sale / Purchase Agreement" },
   { id: "buyers_guide", label: "Buyers Guide" },
@@ -42,7 +47,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
   const [odometer, setOdometer] = useState("");
   const [odometerUnit, setOdometerUnit] = useState<"mi" | "km">("mi");
   const [odometerDate, setOdometerDate] = useState("");
-  const [mode, setMode] = useState<ScanMode>("vin");
+  const [mode, setMode] = useState<ScanMode | null>(null);
   const [documentType, setDocumentType] = useState<DocumentType>("bill_of_sale");
   const [documentName, setDocumentName] = useState("");
   const [readingDocument, setReadingDocument] = useState(false);
@@ -86,7 +91,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
   }, [cameraOpen]);
 
   const identify = async () => {
-    if (mode === "document" || !videoRef.current || !cameraReady || scanning) return;
+    if (mode === null || mode === "document" || !videoRef.current || !cameraReady || scanning) return;
     setScanning(true);
     setError(null);
     try {
@@ -211,37 +216,45 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     setError(null);
   };
 
-  return <div className="app-shell"><main className="screen setup-screen">
+  return <div className="app-shell"><main className={`screen setup-screen${!manual && !scanResult ? " is-k" : ""}${!manual && !scanResult && mode !== null ? " has-k-cta" : ""}`}>
     <header className="topbar"><div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div></header>
-    <div className="setup-hero scan-hero"><p className="eyebrow">YOUR DRIVE, REMEMBERED</p><h1>Add your car</h1><p>Scan a VIN, photograph your car, or add details manually.</p></div>
+    {!manual && !scanResult && mode === null && <div className="k-page">
+      <header className="k-hero"><h1 className="k-title">Add your car</h1><p className="k-lead">Pick how you want to start.</p></header>
+      <section className="k-block is-list" aria-label="Ways to add your car">
+        {METHODS.map((item) => <button className="k-row" type="button" key={item.id} disabled={recognitionAvailable === false} onClick={() => { setMode(item.id); setError(null); }}>
+          <span className="k-row-art"><Icon name={item.icon} size={22}/></span>
+          <span className="k-row-main"><strong>{item.title}</strong><small>{recognitionAvailable === false ? "Needs a Meta API key" : item.detail}</small></span>
+          <Icon className="k-row-trail" name="chevron" size={18}/>
+        </button>)}
+        <button className="k-row" type="button" onClick={showManual}>
+          <span className="k-row-art"><Icon name="plus" size={22}/></span>
+          <span className="k-row-main"><strong>Enter details yourself</strong><small>Year, make, model and odometer</small></span>
+          <Icon className="k-row-trail" name="chevron" size={18}/>
+        </button>
+      </section>
+      <p className="k-info"><Icon name="shield" size={16}/>Photos go to Meta for one-time reading. Carmori does not save the VIN or the document.</p>
+    </div>}
 
-    {!manual && !scanResult && <section className="scan-panel">
-      <div className="scan-panel-heading"><h2>Choose a source</h2></div>
-      <div className="scan-modes three" role="group" aria-label="Scan method">
-        <button type="button" className={mode === "vin" ? "selected" : ""} onClick={() => { setMode("vin"); setError(null); }}>VIN plate</button>
-        <button type="button" className={mode === "exterior" ? "selected" : ""} onClick={() => { setMode("exterior"); setError(null); }}>Car exterior</button>
-        <button type="button" className={mode === "document" ? "selected" : ""} onClick={() => { setMode("document"); setCameraOpen(false); setError(null); }}>Documents</button>
-      </div>
-      {mode === "document" ? <div className="document-source">
-        <p className="document-caption">Purchase document</p>
-        <div className="document-options" role="group" aria-label="Document type">{DOCUMENTS.map((item) => <button key={item.id} type="button" className={documentType === item.id ? "selected" : ""} onClick={() => setDocumentType(item.id)}>{item.label}</button>)}</div>
-        <div className="document-upload-illustration"><Icon name="history" size={30}/><strong>Use a document you already have</strong><span>Photo, JPG, PNG or PDF · up to 8 MB</span></div>
-        <p className="scan-help">The file goes to Meta for one-time reading. Carmori saves confirmed vehicle details, not the document.</p>
+    {!manual && !scanResult && mode !== null && <div className="k-page">
+      <button className="k-back" type="button" onClick={() => { setMode(null); setCameraOpen(false); setError(null); }} aria-label="Back to ways to add your car"><Icon name="chevron" size={22}/></button>
+      <header className="k-hero"><h1 className="k-title">{METHODS.find((item) => item.id === mode)?.title}</h1><p className="k-lead">{METHODS.find((item) => item.id === mode)?.lead}</p></header>
+      {mode === "document" ? <section className="k-block" aria-label="Document type">
+        <h2 className="k-h2">Which document?</h2>
+        <div className="k-chips" role="radiogroup" aria-label="Document type">{DOCUMENTS.map((item) => <button key={item.id} type="button" role="radio" aria-checked={documentType === item.id} className={`k-chip${documentType === item.id ? " is-selected" : ""}`} onClick={() => setDocumentType(item.id)}>{item.label}</button>)}</div>
         <input ref={photoInputRef} type="file" accept="image/jpeg,image/png" capture="environment" hidden onChange={(event) => { void readDocument(event.target.files?.[0]); event.target.value = ""; }}/>
         <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" hidden onChange={(event) => { void readDocument(event.target.files?.[0]); event.target.value = ""; }}/>
-        <div className="document-actions"><button className="primary action-button" type="button" disabled={readingDocument || recognitionAvailable === false} onClick={() => photoInputRef.current?.click()}><Icon name="camera" size={18}/>{readingDocument ? "Reading document…" : "Take photo"}</button><button className="secondary action-button" type="button" disabled={readingDocument || recognitionAvailable === false} onClick={() => fileInputRef.current?.click()}><Icon name="history" size={18}/>Upload file</button></div>
-      </div> : <>
-        <div className="scan-camera">
-          {cameraOpen ? <video ref={videoRef} playsInline muted aria-label="Live camera preview" /> : <div className="scan-placeholder"><Icon name={mode === "vin" ? "inspect" : "car"} size={52}/><strong>{mode === "vin" ? "Find the VIN plate" : "Frame your car"}</strong><span>{mode === "vin" ? "Usually at the base of the windshield" : "Show the front or rear with the badge visible"}</span></div>}
-          <span className="scan-corner top-left"/><span className="scan-corner top-right"/><span className="scan-corner bottom-left"/><span className="scan-corner bottom-right"/>
-        </div>
-        <p className="scan-help">{mode === "vin" ? "The image goes to Meta for reading and the VIN to NHTSA for decoding. Carmori does not save the VIN." : "An exterior scan suggests make and model. You will enter the model year."}</p>
-      </>}
-      {recognitionAvailable === false && <p className="scan-unavailable"><Icon name="shield" size={15}/>Live recognition needs a Meta API key. Manual entry is available.</p>}
-      {mode !== "document" && (!cameraOpen ? <button className="primary action-button" type="button" onClick={() => { setCameraOpen(true); setError(null); }}><Icon name="camera" size={19}/>Open camera</button>
-        : <button className="primary action-button" type="button" onClick={() => void identify()} disabled={!cameraReady || scanning || recognitionAvailable === false}>{scanning ? "Identifying…" : cameraReady ? "Identify vehicle" : "Starting camera…"}<Icon name="arrow" size={18}/></button>)}
-      <button className="text-button" type="button" onClick={showManual}>Enter vehicle details instead <Icon name="chevron" size={17}/></button>
-    </section>}
+      </section> : cameraOpen ? <section className="k-block" aria-label="Camera">
+        <div className="k-camera"><video ref={videoRef} playsInline muted aria-label="Live camera preview"/></div>
+      </section> : null}
+      <p className="k-info"><Icon name="shield" size={16}/>{mode === "vin" ? "The photo goes to Meta for reading and the VIN to NHTSA for decoding. Carmori does not save the VIN." : mode === "document" ? "The file goes to Meta for one-time reading. Carmori saves confirmed vehicle details, not the document." : "The photo goes to Meta for one-time reading."}</p>
+      <div className="k-cta">
+        {mode === "document" ? <>
+          <button className="k-btn secondary" type="button" disabled={readingDocument} onClick={() => fileInputRef.current?.click()}>Choose file</button>
+          <button className="k-btn primary" type="button" disabled={readingDocument} onClick={() => photoInputRef.current?.click()}>{readingDocument ? "Reading document…" : "Take photo"}</button>
+        </> : !cameraOpen ? <button className="k-btn primary" type="button" onClick={() => { setCameraOpen(true); setError(null); }}>{mode === "vin" ? "Scan VIN plate" : "Take photo"}</button>
+          : <button className="k-btn primary" type="button" onClick={() => void identify()} disabled={!cameraReady || scanning}>{scanning ? "Identifying…" : cameraReady ? "Identify vehicle" : "Starting camera…"}</button>}
+      </div>
+    </div>}
 
     {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}{scanResult.sale_date ? " Confirm the suggested sale date is when you bought this car." : ""}</p></>

@@ -604,10 +604,10 @@ h2,h1,p{overflow-wrap:break-word}
 .shop-unknown svg{flex:none;color:#087f89}
 .shop-disclosure{margin:10px 1px 0;color:#899ba4;font-size:10px;line-height:1.4}
 
-/* k-style Home: gray page with white blocks, large title, 64px rows. */
+/* k-style screens (Home, Add your car): gray page with white blocks, large title, 64px rows. */
 :root{--k-bg:#f2f4f6;--k-surface:#fff;--k-text-1:#191f28;--k-text-2:#4e5968;--k-text-3:#6b7684;--k-brand:#087f89;--k-brand-text:#066e77;--k-brand-tint:#e6f4f5;--k-warning:#b94100;--k-warning-tint:#fff4e5;--k-info:#1f62d6;--k-info-tint:#e8f1ff;--k-danger:#c83323;--k-danger-tint:#fbf1ef;--k-page-x:20px;--k-pad:20px;--k-row-h:64px;--k-r-s:8px;--k-r-m:12px;--k-r-l:16px}
 .home-screen.is-k-home{background:var(--k-bg);padding-bottom:calc(152px + env(safe-area-inset-bottom))}
-.k-home{margin:0 -20px;display:flex;flex-direction:column;gap:12px;color:var(--k-text-1)}
+.k-home,.k-page{margin:0 -20px;display:flex;flex-direction:column;gap:12px;color:var(--k-text-1)}
 .k-hero{padding:4px var(--k-page-x) 8px}
 .k-eyebrow{margin:0;color:var(--k-text-3);font-size:14px;font-weight:500}
 .k-title{margin:2px 0 0;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-.02em;overflow-wrap:anywhere}
@@ -647,3 +647,21 @@ button.k-row:active{background:var(--k-bg)}
 .k-btn.tint{background:var(--k-brand-tint);color:var(--k-brand-text)}
 .k-btn:disabled{opacity:.5;cursor:default}
 .k-btn:focus-visible,.k-row:focus-visible,.k-block-link:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}
+.setup-screen.is-k{background:var(--k-bg)}
+.setup-screen.has-k-cta{padding-bottom:calc(112px + env(safe-area-inset-bottom))}
+button.k-row:disabled{opacity:.45;cursor:default}
+.k-info{display:flex;align-items:flex-start;gap:8px;margin:0;padding:0 var(--k-page-x);color:var(--k-text-3);font-size:13px;line-height:1.5}
+.k-info svg{flex:none;margin-top:2px}
+.k-back{align-self:flex-start;width:44px;height:44px;margin:0 0 -8px 8px;display:grid;place-items:center;border:0;background:none;color:var(--k-text-1)}
+.k-back svg{transform:rotate(180deg)}
+.k-camera{overflow:hidden;aspect-ratio:3/4;border-radius:var(--k-r-l);background:#191f28}
+.k-camera video{display:block;width:100%;height:100%;object-fit:cover}
+.k-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.k-chip{min-height:40px;padding:0 14px;border:1px solid #d1d6db;border-radius:999px;background:var(--k-surface);color:var(--k-text-2);font:inherit;font-size:14px;font-weight:600;text-align:left}
+.k-chip.is-selected{border-color:var(--k-brand);background:var(--k-brand-tint);color:var(--k-brand-text)}
+.k-chip:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}
+.k-cta{position:fixed;z-index:10;bottom:0;left:50%;transform:translateX(-50%);width:min(100%,430px);display:flex;gap:8px;padding:12px 20px calc(12px + env(safe-area-inset-bottom));background:var(--k-bg)}
+.k-cta .k-btn{flex:1;height:56px;font-size:17px}
+.k-btn.primary{background:var(--k-brand);color:#fff}
+.k-btn.primary:active{background:#066e77}
+.k-btn.secondary{background:var(--k-surface);color:var(--k-text-1);box-shadow:inset 0 0 0 1px #d1d6db}
