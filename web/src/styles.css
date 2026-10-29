@@ -603,3 +603,47 @@ h2,h1,p{overflow-wrap:break-word}
 .shop-unknown{display:flex;align-items:flex-start;gap:8px;padding:11px;border-radius:8px;background:#f3f7f8;color:#627d89;font-size:11px;line-height:1.45}
 .shop-unknown svg{flex:none;color:#087f89}
 .shop-disclosure{margin:10px 1px 0;color:#899ba4;font-size:10px;line-height:1.4}
+
+/* k-style Home: gray page with white blocks, large title, 64px rows. */
+:root{--k-bg:#f2f4f6;--k-surface:#fff;--k-text-1:#191f28;--k-text-2:#4e5968;--k-text-3:#6b7684;--k-brand:#087f89;--k-brand-text:#066e77;--k-brand-tint:#e6f4f5;--k-warning:#b94100;--k-warning-tint:#fff4e5;--k-info:#1f62d6;--k-info-tint:#e8f1ff;--k-danger:#c83323;--k-danger-tint:#fbf1ef;--k-page-x:20px;--k-pad:20px;--k-row-h:64px;--k-r-s:8px;--k-r-m:12px;--k-r-l:16px}
+.home-screen.is-k-home{background:var(--k-bg);padding-bottom:calc(152px + env(safe-area-inset-bottom))}
+.k-home{margin:0 -20px;display:flex;flex-direction:column;gap:12px;color:var(--k-text-1)}
+.k-hero{padding:4px var(--k-page-x) 8px}
+.k-eyebrow{margin:0;color:var(--k-text-3);font-size:14px;font-weight:500}
+.k-title{margin:2px 0 0;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-.02em;overflow-wrap:anywhere}
+.k-lead{margin:6px 0 0;color:var(--k-text-2);font-size:16px;line-height:1.5}
+.k-lead b{color:var(--k-brand-text);font-weight:700}
+.k-block{background:var(--k-surface);padding:var(--k-pad)}
+.k-block.is-list{padding:8px 0}
+.k-block-head{display:flex;align-items:center;justify-content:space-between;padding:12px var(--k-pad) 4px}
+.k-h2{margin:0;font-size:20px;line-height:1.4;font-weight:700;letter-spacing:-.01em}
+.k-block-link{display:flex;align-items:center;gap:2px;border:0;background:none;padding:6px 0;color:var(--k-text-3);font:inherit;font-size:14px}
+.k-photo{position:relative;aspect-ratio:16/9;border-radius:var(--k-r-l);overflow:hidden;background:#eef1f4;display:grid;place-items:center}
+.k-photo .vehicle-photo{width:100%;height:100%;object-fit:contain}
+.k-photo .vehicle-photo.is-generated{object-fit:cover}
+.k-photo .vehicle-photo-label{right:10px;bottom:8px;padding:2px 8px;border-radius:999px;background:#ffffffd9;color:var(--k-text-3);font-size:11px;font-weight:500}
+.k-photo .vehicle-photo-empty{height:100%;border:0;border-radius:0;background:transparent;color:var(--k-text-3)}
+.k-photo .vehicle-photo-empty span{font-size:13px;font-weight:600}
+.k-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+.k-facts>div{display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 12px;border-radius:var(--k-r-m);background:var(--k-bg)}
+.k-facts b{font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k-facts span{color:var(--k-text-3);font-size:12px}
+.k-block .k-h2+.k-facts{margin-top:12px}
+.k-row{display:flex;align-items:center;gap:14px;width:100%;min-height:var(--k-row-h);padding:14px var(--k-pad);border:0;background:none;color:inherit;font:inherit;text-align:left}
+button.k-row:active{background:var(--k-bg)}
+.k-row-art{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:var(--k-r-m);background:var(--k-bg);color:#333d4b}
+.k-row-art.washer_fluid{background:#e8f3ff;color:#2272eb}
+.k-row-art.briefing{background:var(--k-brand-tint);color:var(--k-brand)}
+.k-row-main{display:flex;flex-direction:column;align-items:flex-start;flex:1;min-width:0}
+.k-row-main strong{font-size:16px;line-height:1.4;font-weight:600}
+.k-row-main small{margin-top:2px;color:var(--k-text-3);font-size:14px;line-height:1.4}
+.k-row-trail{flex:none;color:#b0b8c1}
+.k-badge{margin-bottom:4px;padding:2px 8px;border-radius:6px;background:var(--k-bg);color:var(--k-text-2);font-size:12px;font-weight:600}
+.k-badge.is-warning{background:var(--k-warning-tint);color:var(--k-warning)}
+.k-badge.is-info{background:var(--k-info-tint);color:var(--k-info)}
+.k-badge.is-danger{background:var(--k-danger-tint);color:var(--k-danger)}
+.k-btn{flex:none;border:0;border-radius:var(--k-r-s);font:inherit;font-weight:700;cursor:pointer}
+.k-btn.small{height:36px;padding:0 14px;font-size:14px}
+.k-btn.tint{background:var(--k-brand-tint);color:var(--k-brand-text)}
+.k-btn:disabled{opacity:.5;cursor:default}
+.k-btn:focus-visible,.k-row:focus-visible,.k-block-link:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}

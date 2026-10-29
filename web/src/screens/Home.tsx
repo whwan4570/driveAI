@@ -4,6 +4,7 @@ import { HistorySummary } from "../components/HistorySummary";
 import { HistoryCalendar } from "../components/HistoryCalendar";
 import { VehiclePhoto } from "../components/VehiclePhoto";
 import { ServiceStatus } from "../components/ServiceStatus";
+import { CarConnection, carConnectionAvailable, readCarBriefingSetting, saveCarBriefingSetting, type CarState } from "../lib/carConnection";
 import { api, type CareResponse, type MaintenanceRecord, type MajorIssue, type Vehicle } from "../lib/api";
 import { parseUtterance } from "../lib/commands";
 import { DrivingGate } from "../lib/drivingGate";
@@ -46,6 +47,10 @@ function vehicleName(vehicle: Vehicle | null): string {
 function priorityLabel(priority: string): string {
   return ({ WARNING: "Warning", CHECK_SOON: "Check soon", INFORMATION_NEEDED: "Needs info", ROUTINE: "Routine" } as Record<string, string>)[priority] ?? priority;
 }
+
+const PRIORITY_ORDER: Record<string, number> = { WARNING: 0, CHECK_SOON: 1, INFORMATION_NEEDED: 2, ROUTINE: 3 };
+// One badge color per meaning across Home: red warning, orange due soon, blue needs information.
+const PRIORITY_TONE: Record<string, string> = { WARNING: "is-danger", CHECK_SOON: "is-warning", INFORMATION_NEEDED: "is-info", ROUTINE: "" };
 
 function voiceStartMessage(error: unknown): string {
   if (error instanceof DOMException) {
@@ -111,6 +116,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const [briefingState, setBriefingState] = useState<"idle" | "loading" | "speaking" | "played">("idle");
   const [fabHidden, setFabHidden] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(false);
+  const [carBriefing, setCarBriefing] = useState(readCarBriefingSetting);
   const [autoMessage, setAutoMessage] = useState("Enable once before your drive");
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [trackingMessage, setTrackingMessage] = useState("Tracking is off");
@@ -135,7 +141,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const autoEnabledRef = useRef(false);
   const gateRef = useRef(new DrivingGate());
   const busyRef = useRef(false);
-  const playBriefingRef = useRef<(source: "manual" | "auto") => Promise<void>>(async () => undefined);
+  const playBriefingRef = useRef<(source: "manual" | "auto" | "car") => Promise<void>>(async () => undefined);
   const lastSpokenRef = useRef<string | null>(null);
   const documentReturnTabRef = useRef<Tab>("home");
   const add = (who: Caption["who"], text: string, sourceUrl?: string, sourceLabel?: string) => setCaptions((c) => [...c, { who, text, sourceUrl, sourceLabel }]);
@@ -345,7 +351,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     goToTab("history");
   };
 
-  const playBriefing = async (source: "manual" | "auto") => {
+  const playBriefing = async (source: "manual" | "auto" | "car") => {
     if (busyRef.current) return;
     busyRef.current = true;
     setError(null);
@@ -355,7 +361,14 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     try {
       const { text } = await api.briefing(vehicleId);
       setBriefingState("speaking");
-      await say(text);
+      if (source === "car") {
+        // Native speech plays through CarPlay / Android Auto without a tap on the phone.
+        add("carmori", text);
+        lastSpokenRef.current = text;
+        await CarConnection.speak({ text });
+      } else {
+        await say(text);
+      }
       if (source === "manual") gateRef.current.markPlayed();
       setBriefingState("played");
       if (source === "auto") setAutoMessage("Played for this drive");
@@ -368,6 +381,26 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     }
   };
   playBriefingRef.current = playBriefing;
+
+  // Play the briefing once each time the phone connects to CarPlay or Android Auto while Carmori is open.
+  useEffect(() => {
+    if (!carConnectionAvailable || !carBriefing) return;
+    let cancelled = false;
+    let playedThisConnection = false;
+    const onState = (state: CarState) => {
+      if (cancelled) return;
+      if (!state.connected) { playedThisConnection = false; return; }
+      if (playedThisConnection) return;
+      playedThisConnection = true;
+      void playBriefingRef.current("car");
+    };
+    const listener = CarConnection.addListener("carConnectionChange", onState);
+    void CarConnection.getState().then(onState).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      void listener.then((handle) => handle.remove());
+    };
+  }, [carBriefing, vehicleId]);
 
   const startVoiceChat = async () => {
     setError(null);
@@ -595,10 +628,8 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const shownStatusCare = samplePreview ? sampleStatusCare(care) : care;
   const weekHighway = shownDriveSummary.weekMeters ? Math.round((shownDriveSummary.weekHighwayMeters / shownDriveSummary.weekMeters) * 100) : null;
   const activeCareCount = care?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
-  const notificationItems = care?.recommendations.filter((item) => item.priority !== "ROUTINE") ?? [];
-  const topCareItem = [...notificationItems].sort((a, b) =>
-    ({ WARNING: 0, CHECK_SOON: 1, INFORMATION_NEEDED: 2, ROUTINE: 3 })[a.priority] -
-    ({ WARNING: 0, CHECK_SOON: 1, INFORMATION_NEEDED: 2, ROUTINE: 3 })[b.priority])[0];
+  const notificationItems = (care?.recommendations.filter((item) => item.priority !== "ROUTINE") ?? [])
+    .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
   const documentAlerts = documents.filter((record) => record.vehicleId === vehicleId).flatMap((record) => {
     const reminder = documentReminder(record);
     return reminder ? [{ record, reminder }] : [];
@@ -618,7 +649,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   ];
 
   return <div className={`app-shell${keyboardOffset !== null ? " assistant-keyboard-open" : ""}`}>
-    <main className={`screen home-screen${tab === "assistant" ? " assistant-screen" : ""}`}>
+    <main className={`screen home-screen${tab === "assistant" ? " assistant-screen" : ""}${tab === "home" && !profileOpen ? " is-k-home" : ""}`}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div>
         <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">{demoMode ? "Demo Mode" : "Sample vehicle"}</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={20}/>{notificationItems.length + documentAlerts.length > 0 && <span className="topbar-alert-count">{notificationItems.length + documentAlerts.length}</span>}</button><button ref={menuButtonRef} className="profile-button" type="button" onClick={openMenu} aria-label="Open menu" aria-expanded={menuOpen} aria-controls="carmori-side-menu" title="Menu"><Icon name="menu" size={22}/></button></div>
@@ -636,26 +667,46 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
 
       {profileOpen && vehicle && <VehicleEditor vehicle={vehicle} hasMajorIssues={majorIssues.length > 0} onSaved={(updated) => { setVehicle(updated); setProfileOpen(false); void refreshData(); }} onCancel={() => setProfileOpen(false)}/>}
 
-      {!profileOpen && tab === "home" && <>
-        <p className="eyebrow home-kicker">YOUR DRIVE, REMEMBERED</p>
-        <section className="vehicle-briefing-card" aria-label="My vehicle and briefing">
-          <div className="vehicle-briefing-top">
-            <div className="vehicle-briefing-copy"><h1>{vehicle?.nickname || vehicleName(vehicle)}</h1>{vehicle?.nickname && <p className="vehicle-model">{vehicleName(vehicle)}</p>}<p className="vehicle-mileage">{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p></div>
-            <div className="vehicle-photo-stage"><VehiclePhoto vehicle={vehicle}/></div>
-          </div>
+      {!profileOpen && tab === "home" && <div className="k-home">
+        <header className="k-hero">
+          <p className="k-eyebrow">{vehicle?.nickname ? vehicleName(vehicle) : "Your car"}</p>
+          <h1 className="k-title">{vehicle?.nickname || vehicleName(vehicle)}</h1>
+          <p className="k-lead">{careLoading ? "Checking saved records…" : activeCareCount > 0 ? <><b>{activeCareCount} {activeCareCount === 1 ? "check" : "checks"}</b> before your next drive</> : "Nothing to review in your saved records"}</p>
+        </header>
+        <section className="k-block" aria-label="My vehicle">
+          <div className="k-photo"><VehiclePhoto vehicle={vehicle}/></div>
           {vehicle?.image_status === "failed" && <div className="vehicle-image-error" role="status"><span>{vehicle.image_error || "Vehicle image unavailable."}</span><button type="button" onClick={() => void retryImage()} disabled={imageRetrying}>{imageRetrying ? "Trying…" : "Retry"}</button></div>}
-          <div className="vehicle-briefing-body">
-          {careLoading ? <p className="vehicle-briefing-greeting">Checking saved records…</p> : activeCareCount > 0 ? <p className="vehicle-briefing-greeting">{activeCareCount} {activeCareCount === 1 ? "item" : "items"} to review</p> : null}
-          <div className="vehicle-briefing-play"><div><strong>Hear briefing</strong><span>From your saved records</span></div><button className="drive-briefing-icon" type="button" onClick={() => void playBriefing("manual")} disabled={busy} aria-label="Hear briefing" title="Hear briefing"><Icon name="volume" size={23}/></button></div>
-          <div className="drive-auto-row"><div><strong>Play when driving</strong><small>Uses phone location while this page is open</small></div><button type="button" role="switch" aria-checked={autoEnabled} aria-label="Auto briefing when driving" className={`drive-auto-switch${autoEnabled ? " on" : ""}`} onClick={toggleAutoBriefing}><span/>{autoEnabled ? "On" : "Off"}</button></div>
-          {autoEnabled && <p className="drive-auto-status"><span className="drive-status-dot active"/>{autoMessage}</p>}
-          {briefingState !== "idle" && <span className="drive-played-note" aria-live="polite">{briefingState === "loading" ? "Preparing briefing…" : briefingState === "speaking" ? "Speaking now…" : "Briefing played"}</span>}
+          <div className="k-facts">
+            <div><b>{vehicle?.odometer_km == null ? "—" : Math.round(vehicle.odometer_km / 1.609344).toLocaleString()}</b><span>{vehicle?.odometer_km == null ? "Odometer not set" : "Miles"}</span></div>
+            <div><b>{miles(shownDriveSummary.weekMeters)}</b><span>This week</span></div>
+            <div><b>{!samplePreview && care?.environment.status === "available" && care.environment.rainfall_mm !== null ? `${care.environment.rainfall_mm.toFixed(1)} mm` : "—"}</b><span>Rain, 7 days</span></div>
           </div>
         </section>
-        {topCareItem && <button type="button" className={`home-next-action ${topCareItem.priority.toLowerCase()}`} onClick={() => openNotification(topCareItem.component)}><span className="home-next-dot"/><span className="home-next-copy"><small>{priorityLabel(topCareItem.priority)} · {notificationItems.length} to review</small><strong>{topCareItem.title}</strong><em>View in Status</em></span><Icon name="chevron" size={19}/></button>}
-        <section className="driving-insights-card"><div className="driving-insights-heading"><h2>Driving insights</h2></div><div className="driving-insights-grid"><div><strong>{miles(shownDriveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City</span></div></div><p>{samplePreview ? "6 sample days · Not GPS data" : driveSummary.weekTrackedDays ? `${driveSummary.weekTrackedDays} tracked ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} · Phone GPS` : trackingEnabled ? "Tracking with phone GPS" : "Track a drive to see your mileage"}{!samplePreview && care?.environment.status === "available" ? ` · 7-day rain: ${care.environment.rainfall_mm?.toFixed(1)} mm (Open-Meteo)` : ""}</p></section>
-
-      </>}
+        {notificationItems.length > 0 && <section className="k-block is-list" aria-label="To review">
+          <div className="k-block-head"><h2 className="k-h2">To review</h2><button className="k-block-link" type="button" onClick={() => goToTab("status")}>Status<Icon name="chevron" size={14}/></button></div>
+          {notificationItems.map((item) => <button className="k-row" type="button" key={item.id} onClick={() => openNotification(item.component)}>
+            <span className={`k-row-art ${item.component}`}><Icon name={item.component === "washer_fluid" ? "washer" : "status"} size={22}/></span>
+            <span className="k-row-main"><span className={`k-badge ${PRIORITY_TONE[item.priority]}`}>{priorityLabel(item.priority)}</span><strong>{item.title}</strong><small>{item.last_recorded_at ? `Last recorded ${new Date(item.last_recorded_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "No confirmed record yet"}</small></span>
+            <Icon className="k-row-trail" name="chevron" size={18}/>
+          </button>)}
+        </section>}
+        <section className="k-block is-list" aria-label="Briefing">
+          <div className="k-block-head"><h2 className="k-h2">Briefing</h2></div>
+          <div className="k-row">
+            <span className="k-row-art briefing"><Icon name="volume" size={22}/></span>
+            <span className="k-row-main"><strong>Hear briefing</strong><small aria-live="polite">{briefingState === "loading" ? "Preparing briefing…" : briefingState === "speaking" ? "Speaking now…" : briefingState === "idle" ? "From your saved records" : "Briefing played"}</small></span>
+            <button className="k-btn small tint" type="button" onClick={() => void playBriefing("manual")} disabled={busy}>Play</button>
+          </div>
+        </section>
+        {shownDriveSummary.weekMeters ? <section className="k-block" aria-label="Driving insights">
+          <h2 className="k-h2">Driving insights</h2>
+          <div className="k-facts">
+            <div><b>{weekHighway === null ? "—" : `${weekHighway}%`}</b><span>Highway</span></div>
+            <div><b>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</b><span>City</span></div>
+            <div><b>{samplePreview ? 6 : driveSummary.weekTrackedDays}</b><span>{samplePreview ? "Sample days" : "Tracked days"}</span></div>
+          </div>
+        </section> : null}
+      </div>}
 
       {!profileOpen && tab === "status" && <>
         <section className="status-mileage-card" aria-label="Driving activity">
@@ -730,6 +781,17 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
             <p>Resumes when you reopen the app. Uses phone location while this page is open.</p>
             <button className={`side-menu-track${trackingEnabled ? " is-tracking" : ""}`} type="button" onClick={toggleStatusTracking}><Icon name={trackingEnabled ? "pause" : "status"} size={19}/>{trackingEnabled ? "Stop drive tracking" : "Start drive tracking"}</button>
             <p className="side-menu-track-status" role="status"><span className={trackingEnabled ? "status-tracking-dot active" : "status-tracking-dot"}/>{trackingMessage}</p>
+            <div className="side-menu-settings-divider"/>
+            <strong>Play briefing when driving</strong>
+            <p>Plays your briefing once driving movement is detected. Also records your drives with phone location while this page is open.</p>
+            <button className={`side-menu-track${autoEnabled ? " is-tracking" : ""}`} type="button" role="switch" aria-checked={autoEnabled} onClick={toggleAutoBriefing}><Icon name={autoEnabled ? "pause" : "volume"} size={19}/>{autoEnabled ? "Turn off auto briefing" : "Turn on auto briefing"}</button>
+            {autoEnabled && <p className="side-menu-track-status" role="status"><span className="status-tracking-dot active"/>{autoMessage}</p>}
+            {carConnectionAvailable && <>
+              <div className="side-menu-settings-divider"/>
+              <strong>Play briefing when car connects</strong>
+              <p>Plays through CarPlay or Android Auto when Carmori is open as your phone connects.</p>
+              <button className={`side-menu-track${carBriefing ? " is-tracking" : ""}`} type="button" role="switch" aria-checked={carBriefing} onClick={() => { saveCarBriefingSetting(!carBriefing); setCarBriefing(!carBriefing); }}><Icon name={carBriefing ? "pause" : "car"} size={19}/>{carBriefing ? "Turn off car briefing" : "Turn on car briefing"}</button>
+            </>}
           </div>}
         </>}
       </aside>
