@@ -50,7 +50,7 @@ from .spark import MetaSparkClient, SparkClient, make_spark_client
 from .sam_video import MetaSamVideoTracker, SamTarget, SamVideoResult, SamVideoTracker
 from .state_machine import TransitionResult, apply_voice, new_session, transition
 from .store import MemoryStore, SQLiteStore, Store
-from .vehicles import SUPPORTED_SPECS, VehicleSpec, get_spec
+from .vehicles import DEMO_SPEC, SUPPORTED_SPECS, VehicleSpec, get_spec, match_spec
 from .vehicle_recognition import DocumentMime, DocumentType, MetaVehicleRecognizer, ScanMode, VehicleRecognizer, VehicleScanResult, clean_name
 from .vehicle_catalog import MAKES, POPULAR_MAKES, ModelCatalog, NhtsaModelCatalog
 from .vehicle_image import MetaVehicleImageGenerator, VehicleImageError, VehicleImageGenerator
@@ -286,7 +286,8 @@ def create_app(
         spec = get_spec(vehicle.spec_id) if vehicle else None
         if vehicle is None or spec is None:
             raise HTTPException(404, "vehicle not found")
-        return vehicle, spec
+        # Vehicles saved before a vehicle-specific guide existed still get it.
+        return vehicle, match_spec(vehicle.year, vehicle.make, vehicle.model) or spec
 
     def image_identity(vehicle: VehicleProfile) -> tuple[int, str | None, str | None, str | None, str | None]:
         return (vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.exterior_color)
@@ -387,6 +388,7 @@ def create_app(
         spec = get_spec(body.spec_id)
         if spec is None or not spec.years[0] <= body.year <= spec.years[1]:
             raise HTTPException(422, "unsupported vehicle")
+        spec = match_spec(body.year, body.make, body.model) or spec
         check_relationship_dates(body.purchased_on, body.first_drive_on, body.major_issue_free_confirmed)
         vehicle = VehicleProfile(
             vehicle_id=uuid.uuid4().hex,
@@ -466,9 +468,9 @@ def create_app(
 
     @app.patch("/vehicles/{vehicle_id}")
     def update_vehicle(vehicle_id: str, body: VehiclePatchIn, background_tasks: BackgroundTasks) -> VehicleProfile:
-        vehicle, spec = vehicle_or_404(vehicle_id)
+        vehicle, _ = vehicle_or_404(vehicle_id)
         changes = body.model_dump(exclude_unset=True)
-        if "year" in changes and (changes["year"] is None or not spec.years[0] <= changes["year"] <= spec.years[1]):
+        if "year" in changes and (changes["year"] is None or not DEMO_SPEC.years[0] <= changes["year"] <= DEMO_SPEC.years[1]):
             raise HTTPException(422, "unsupported vehicle year")
         for field in ("make", "model", "trim", "region", "nickname", "exterior_color"):
             if field in changes:
@@ -481,6 +483,8 @@ def create_app(
         if changes.get("purchased_on") is None and "purchased_on" in changes and "major_issue_free_confirmed" not in changes:
             changes["major_issue_free_confirmed"] = False
         updated = vehicle.model_copy(update=changes)
+        matched = match_spec(updated.year, updated.make, updated.model)
+        updated = updated.model_copy(update={"spec_id": matched.spec_id if matched else DEMO_SPEC.spec_id})
         check_relationship_dates(updated.purchased_on, updated.first_drive_on, updated.major_issue_free_confirmed)
         issues = store.list_major_issues(vehicle_id)
         if updated.major_issue_free_confirmed and issues:
@@ -530,10 +534,10 @@ def create_app(
 
     @app.get("/vehicles/{vehicle_id}/care-recommendations")
     async def care_recommendations(vehicle_id: str) -> dict:
-        vehicle, _ = vehicle_or_404(vehicle_id)
+        vehicle, spec = vehicle_or_404(vehicle_id)
         now = utcnow()
         environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
-        recommendations: list[Recommendation] = calculate_recommendations(vehicle, store.list_records(vehicle_id), now, environment)
+        recommendations: list[Recommendation] = calculate_recommendations(vehicle, store.list_records(vehicle_id), now, environment, spec)
         return {
             "recommendations": [item.model_dump(mode="json") for item in recommendations],
             "environment": environment.model_dump(mode="json"),
@@ -792,7 +796,7 @@ def create_app(
         now = utcnow()
         facts = build_facts(vehicle, spec, records, weather, now)
         environment = await environment_provider.get(vehicle.region, vehicle_coords(vehicle))
-        text = render_briefing(facts, recommendations=calculate_recommendations(vehicle, records, now, environment))
+        text = render_briefing(facts, recommendations=calculate_recommendations(vehicle, records, now, environment, spec))
         return BriefingOut(text=text, facts=[f.model_dump(mode="json") for f in facts])
 
     @app.post("/assistant/ask")

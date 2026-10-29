@@ -71,7 +71,13 @@ def build_facts(
     tires = [record for record in records if record.component == "tires" and record.confirmed]
     tire = max(tires, key=lambda record: record.completed_at, default=None)
     facts.append(Fact(id="tire_history", text=f"The last confirmed tire action was {tire.event_type} on {tire.completed_at.date().isoformat()}." if tire else "There is no confirmed tire inspection on record.", source="records", as_of=tire.completed_at if tire else None))
-    facts.append(Fact(id="manufacturer_guidance", text="Vehicle-specific manufacturer service guidance is unavailable.", source="system"))
+    if spec.manual_notes:
+        facts.extend(
+            Fact(id=note.id, text=f"{note.text} (owner's manual p. {note.page})", source="owner_manual")
+            for note in spec.manual_notes
+        )
+    else:
+        facts.append(Fact(id="manufacturer_guidance", text="Vehicle-specific manufacturer service guidance is unavailable.", source="system"))
     if weather is not None:
         facts.append(
             Fact(
@@ -85,7 +91,7 @@ def build_facts(
 
 
 def render_briefing(facts: Sequence[Fact], *, recommendations: Sequence[Recommendation]) -> str:
-    parts = [f.text for f in facts if f.id in {"last_refill", "level_unknown", "weather"}]
+    parts = [f.text for f in facts if f.id in {"last_refill", "level_unknown", "manual_washer_check", "weather"}]
     for recommendation in recommendations:
         if recommendation.priority != "ROUTINE":
             parts.append(recommendation.explanation)
