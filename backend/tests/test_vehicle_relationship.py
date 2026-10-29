@@ -46,9 +46,12 @@ def test_relationship_rejects_unsupported_dates():
         "spec_id": "demo", "year": 2021,
         "purchased_on": "2024-03-10", "first_drive_on": "2024-03-09",
     }).status_code == 422
-    assert client.post("/vehicles", json={
+    app_start_confirmation = client.post("/vehicles", json={
         "spec_id": "demo", "year": 2021, "major_issue_free_confirmed": True,
-    }).status_code == 422
+    })
+    assert app_start_confirmation.status_code == 200
+    assert app_start_confirmation.json()["purchased_on"] is None
+    assert app_start_confirmation.json()["major_issue_free_confirmed"] is True
     vehicle_id = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
     tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
     assert client.post(f"/vehicles/{vehicle_id}/major-issues", json={

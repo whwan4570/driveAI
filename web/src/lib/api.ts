@@ -1,4 +1,5 @@
 // 백엔드 계약(backend/carmori/main.py)과 같은 모양을 유지한다.
+import type { ServiceComponent } from "./serviceIntervals";
 
 export type Step = "FIND_INLET" | "OPEN_CAP" | "CONFIRM_PRODUCT" | "POUR" | "FINISH" | "RECORDED";
 export type WaitReason =
@@ -53,6 +54,7 @@ export interface Vehicle {
   model_3d_status: "unavailable" | "ready";
   model_3d_updated_at: string | null;
   profile_source: "manual" | "scan" | "document" | "demo";
+  created_at: string;
 }
 
 export interface CareEvidence {
@@ -225,14 +227,14 @@ export const api = {
   deleteMajorIssue: (vehicleId: string, issueId: string) =>
     call<void>(`/vehicles/${vehicleId}/major-issues/${issueId}`, { method: "DELETE" }),
   care: (vehicleId: string) => call<CareResponse>(`/vehicles/${vehicleId}/care-recommendations`),
-  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | "tires" | "engine_oil" | "brake_pads" | "cabin_filter" | "engine_air_filter"; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
+  addRecord: (body: { vehicle_id: string; component: "washer_fluid" | ServiceComponent; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
   analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire"; jpeg_base64: string }) =>
     post<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),
   ask: (vehicleId: string, question: string, sessionId?: string) =>
-    post<{ text: string; fact_ids: string[] }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
+    post<{ text: string; fact_ids: string[]; source_url?: string | null; source_label?: string | null }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
   startSession: (vehicleId: string) => post<SessionUpdate>("/sessions", { vehicle_id: vehicleId }),
   observe: (sessionId: string, windows: WindowIn[], expectedStateVersion: number) =>
     post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows, expected_state_version: expectedStateVersion }),

@@ -9,6 +9,7 @@ mkdirSync(out, { recursive: true });
 
 const vadDist = join(root, "node_modules", "@ricky0123", "vad-web", "dist");
 const ortDist = join(root, "node_modules", "onnxruntime-web", "dist");
+const ortModuleOut = join(root, "src", "vendor");
 
 const files = [
   [vadDist, "silero_vad_legacy.onnx"],
@@ -20,4 +21,6 @@ const files = [
 ];
 
 for (const [dir, name] of files) copyFileSync(join(dir, name), join(out, name));
+mkdirSync(ortModuleOut, { recursive: true });
+copyFileSync(join(ortDist, "ort-wasm-simd-threaded.mjs"), join(ortModuleOut, "ort-wasm-simd-threaded.mjs"));
 console.log(`copied ${files.length} VAD assets to public/vad`);

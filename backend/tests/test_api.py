@@ -172,6 +172,23 @@ def test_service_replacements_are_saved_and_recounted():
     assert "engine air filter replacement" in answer["text"]
 
 
+def test_additional_service_items_can_be_recorded():
+    client = make_client()
+    created = client.post("/vehicles", json={
+        "spec_id": "demo", "year": 2020, "make": "Ford", "model": "Focus",
+    })
+    assert created.status_code == 200
+    vid = created.json()["vehicle_id"]
+    for component in ("engine_oil_filter", "brake_fluid", "transmission_fluid", "spark_plugs", "engine_coolant", "drive_belt"):
+        saved = client.post("/maintenance-records", json={
+            "vehicle_id": vid, "component": component, "event_type": "replacement",
+            "user_confirmed": True,
+        })
+        assert saved.status_code == 200
+        assert saved.json()["component"] == component
+    assert len(client.get(f"/vehicles/{vid}/memory").json()) == 6
+
+
 def test_vehicle_scan_requires_real_model_and_rejects_bad_images():
     client = make_client()
     image = base64.b64encode(b"\xff\xd8" + b"x" * 150 + b"\xff\xd9").decode()

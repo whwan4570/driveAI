@@ -2,9 +2,9 @@ import type { ReactNode, SVGProps } from "react";
 
 export type IconName =
   | "car" | "home" | "status" | "assistant" | "inspect" | "history" | "washer"
-  | "calendar" | "cloud" | "mic" | "play" | "pause" | "close"
+  | "calendar" | "cloud" | "mic" | "play" | "pause" | "close" | "plus"
   | "arrow" | "check" | "camera" | "volume" | "spark" | "eye"
-  | "refresh" | "bell" | "shield" | "chevron" | "file";
+  | "refresh" | "bell" | "shield" | "chevron" | "file" | "menu" | "profile" | "settings";
 
 export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number }) {
   const shared = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const, ...props };
@@ -22,6 +22,7 @@ export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { 
     play: <path d="m9 6 9 6-9 6V6Z" fill="currentColor" stroke="none"/>,
     pause: <><path d="M9 6v12m6-12v12" strokeWidth="3"/></>,
     close: <path d="M5 5 19 19M19 5 5 19"/>,
+    plus: <path d="M12 4v16M4 12h16"/>,
     arrow: <><path d="M4 12h16m-6-6 6 6-6 6"/></>,
     check: <path d="m4 12 5 5L20 6"/>,
     camera: <><path d="M3 8h4l2-3h6l2 3h4v11H3V8Z"/><circle cx="12" cy="13" r="3"/></>,
@@ -33,6 +34,9 @@ export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { 
     shield: <><path d="M12 2 20 5v6c0 5-3 8-8 11-5-3-8-6-8-11V5l8-3Z"/><path d="m8 12 3 3 5-6"/></>,
     chevron: <path d="m9 5 7 7-7 7"/>,
     file: <><path d="M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,
+    menu: <path d="M4 6h16M4 12h16M4 18h16"/>,
+    profile: <><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M9.5 2.8h5l.7 2.2 2 1.2 2.2-.5 2.5 4.3-1.5 1.7v2.5l1.5 1.7-2.5 4.3-2.2-.5-2 1.2-.7 2.2h-5l-.7-2.2-2-1.2-2.2.5-2.5-4.3 1.5-1.7v-2.5l-1.5-1.7 2.5-4.3 2.2.5 2-1.2.7-2.2Z"/></>,
   };
   return <svg {...shared}>{paths[name]}</svg>;
 }

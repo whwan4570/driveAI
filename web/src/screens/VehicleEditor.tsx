@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
 import { VehiclePicker } from "../components/VehiclePicker";
 import { api, type Vehicle } from "../lib/api";
-import { todayLocalISO } from "../lib/vehicleDates";
+import { formatVehicleDate, localDateISO, todayLocalISO } from "../lib/vehicleDates";
 
 export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
   vehicle: Vehicle;
@@ -31,7 +31,7 @@ export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
     if (!make.trim() || !model.trim()) { setError("Choose your vehicle make and model."); return; }
     if ((purchasedOn && purchasedOn > todayLocalISO()) || (firstDriveOn && firstDriveOn > todayLocalISO()) ||
         (purchasedOn && firstDriveOn && firstDriveOn < purchasedOn) ||
-        (majorIssueFreeConfirmed && (!purchasedOn || hasMajorIssues))) {
+        (majorIssueFreeConfirmed && hasMajorIssues)) {
       setError("Check the purchase date, first-drive date, and major issue history."); return;
     }
     setSaving(true);
@@ -57,11 +57,13 @@ export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
   return <div className="vehicle-editor">
     <div className="page-heading"><p className="eyebrow">MY VEHICLE</p><h1>Edit vehicle</h1><p>Keep your care suggestions grounded in current details.</p></div>
     <form className="setup-form" onSubmit={(event) => void save(event)}>
-      <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); }}/>
-      <div className="review-fields"><label>Model year<input type="number" min="1981" max="2035" value={year} onChange={(event) => setYear(event.target.value)} required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(event) => setTrim(event.target.value)} maxLength={60}/></label></div>
+      <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); setTrim(""); }}/>
+      <label>Model year<input type="number" min="1981" max="2035" value={year} onChange={(event) => setYear(event.target.value)} required/></label>
+      <label>Trim <span className="optional">optional</span><input value={trim} onChange={(event) => setTrim(event.target.value)} maxLength={60} placeholder="e.g. EX"/></label>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
       <div className="review-fields"><label>Purchase date <span className="optional">optional</span><input type="date" max={todayLocalISO()} value={purchasedOn} onChange={(event) => { setPurchasedOn(event.target.value); setMajorIssueFreeConfirmed(false); }}/></label><label>First drive date <span className="optional">optional</span><input type="date" min={purchasedOn || undefined} max={todayLocalISO()} value={firstDriveOn} onChange={(event) => setFirstDriveOn(event.target.value)}/></label></div>
-      {!hasMajorIssues && <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} disabled={!purchasedOn} onChange={(event) => setMajorIssueFreeConfirmed(event.target.checked)}/><span>No major issues since purchase: accidents, engine or transmission failures, brake or steering failures, or breakdowns requiring a tow. Routine maintenance is excluded.</span></label>}
+      <p className="form-help">Leave either date blank and the count starts from {formatVehicleDate(localDateISO(vehicle.created_at))}, your first day with Carmori.</p>
+      {!hasMajorIssues && <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} onChange={(event) => setMajorIssueFreeConfirmed(event.target.checked)}/><span>No major issues since {purchasedOn ? "purchase" : "starting Carmori"}: accidents, engine or transmission failures, brake or steering failures, or breakdowns requiring a tow. Routine maintenance is excluded.</span></label>}
       <label>Exterior color<input value={exteriorColor} onChange={(event) => setExteriorColor(event.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>
       <p className="form-help">Changing the vehicle or paint color creates a new image automatically.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(event) => setOdometer(event.target.value)} required/></label><label>Unit<select value={unit} onChange={(event) => setUnit(event.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>

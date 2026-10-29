@@ -150,8 +150,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     }
     if ((firstDriveOn && purchasedOn && firstDriveOn < purchasedOn) ||
         (purchasedOn && purchasedOn > todayLocalISO()) ||
-        (firstDriveOn && firstDriveOn > todayLocalISO()) ||
-        (majorIssueFreeConfirmed && !purchasedOn)) {
+        (firstDriveOn && firstDriveOn > todayLocalISO())) {
       setError("Check the purchase and first-drive dates before continuing.");
       return;
     }
@@ -245,8 +244,8 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       <div className="review-fields"><label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label><label>Trim <span className="optional">optional</span><input value={trim} onChange={(e) => setTrim(e.target.value)} maxLength={60} placeholder="e.g. EX"/></label></div>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>
       <div className="review-fields"><label>Purchase date <span className="optional">optional</span><input type="date" max={todayLocalISO()} value={purchasedOn} onChange={(e) => { setPurchasedOn(e.target.value); setMajorIssueFreeConfirmed(false); }}/></label><label>First drive date <span className="optional">optional</span><input type="date" min={purchasedOn || undefined} max={todayLocalISO()} value={firstDriveOn} onChange={(e) => setFirstDriveOn(e.target.value)}/></label></div>
-      <p className="form-help">A sale date may be on your bill of sale or odometer disclosure. Enter when you first drove this car separately.</p>
-      <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} disabled={!purchasedOn} onChange={(e) => setMajorIssueFreeConfirmed(e.target.checked)}/><span>No major issues since purchase. This includes accidents, engine or transmission failures, brake or steering failures, and breakdowns requiring a tow. Routine maintenance is excluded.</span></label>
+      <p className="form-help">Don't know these dates? Leave them blank. Your count starts the day you add this car to Carmori.</p>
+      <label className="relationship-confirm"><input type="checkbox" checked={majorIssueFreeConfirmed} onChange={(e) => setMajorIssueFreeConfirmed(e.target.checked)}/><span>No major issues since {purchasedOn ? "purchase" : "starting Carmori"}. This includes accidents, engine or transmission failures, brake or steering failures, and breakdowns requiring a tow. Routine maintenance is excluded.</span></label>
       <label>Exterior color<input value={exteriorColor} onChange={(e) => setExteriorColor(e.target.value)} maxLength={40} placeholder="e.g. Lunar Silver Metallic" required/></label>
       <p className="review-note">Carmori creates your vehicle image automatically from these confirmed details.</p>
       <div className="review-fields"><label>Odometer<input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="Current reading" required/></label><label>Unit<select value={odometerUnit} onChange={(e) => setOdometerUnit(e.target.value as "mi" | "km")}><option value="mi">Miles</option><option value="km">Kilometers</option></select></label></div>

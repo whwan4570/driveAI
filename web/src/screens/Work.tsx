@@ -45,6 +45,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [session, setSession] = useState<SessionView | null>(null);
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [cameraAvailable, setCameraAvailable] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
   const [visionStatus, setVisionStatus] = useState<string>("unverified");
@@ -232,6 +233,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   };
 
   useUtterances(async (text) => {
+    setVoiceError(null);
     add("me", text);
     const parsed = parseUtterance(text);
     if (parsed.kind === "session" && session) {
@@ -246,7 +248,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         setError("I could not get an answer. Please ask again.");
       }
     }
-  });
+  }, (issue) => setVoiceError(issue === "empty" ? "I didn't catch that. Please try again." : "Voice transcription failed. Check your connection and try again."));
 
   const current = session ? STEPS[session.step] : null;
   const done = session?.step === "RECORDED";
@@ -298,6 +300,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
     {lastHint && session && <div className="observed-event"><span><Icon name="eye" size={17}/></span><p>{lastHint}</p></div>}
     {error && <div className="inline-error" role="alert">{error}</div>}
+    {voiceError && <div className="inline-error" role="alert">{voiceError}</div>}
     {session?.step === "CONFIRM_PRODUCT" && <section className="inspection-controls"><h2>Check the product label</h2><p>Show the label to the live camera, or upload a close-up for a separate check.</p><button type="button" onClick={() => productInputRef.current?.click()} disabled={analyzing}>Scan label photo</button><input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => void upload(e.target.files?.[0], "product")}/>{productInspection && <div className={`inspection-message ${productInspection.product_status.toLowerCase()}`}>{productInspection.observation} · {productInspection.product_status}</div>}</section>}
     {captions.length > 0 && <div className="work-captions"><Captions items={captions.slice(-2)}/></div>}
 

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api, type MajorIssue, type MajorIssueKind, type Vehicle } from "../lib/api";
-import { daysSince, formatVehicleDate, todayLocalISO } from "../lib/vehicleDates";
+import { daysSince, formatVehicleDate, localDateISO, todayLocalISO } from "../lib/vehicleDates";
 
 const ISSUE_LABELS: Record<MajorIssueKind, string> = {
   accident: "Accident",
@@ -25,14 +25,15 @@ export function HistorySummary({ vehicle, issues, issuesLoading, issuesAvailable
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const togetherDays = daysSince(vehicle?.purchased_on);
+  const appStart = localDateISO(vehicle?.created_at);
+  const togetherDays = daysSince(vehicle?.purchased_on ?? appStart);
   const latestIssue = issuesAvailable ? issues[0] ?? null : null;
   const issueFreeDays = issuesLoading || !issuesAvailable ? null : latestIssue
     ? daysSince(latestIssue.occurred_on)
     : vehicle?.major_issue_free_confirmed ? togetherDays : null;
 
   const confirmNoIssues = async () => {
-    if (!vehicle?.purchased_on || issues.length || !issuesAvailable || busy) return;
+    if (!vehicle || issues.length || !issuesAvailable || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -79,22 +80,23 @@ export function HistorySummary({ vehicle, issues, issuesLoading, issuesAvailable
   return <div className="history-summary">
     <section className="relationship-card" aria-label="Your time with this vehicle">
       <div className="relationship-metric">
-        <div className="relationship-card-top"><h1>Days together</h1><button type="button" onClick={onEditVehicle}>{vehicle?.purchased_on ? "Edit dates" : "Add purchase date"}</button></div>
+        <div className="relationship-card-top"><h1>Days together</h1><button type="button" onClick={onEditVehicle}>{vehicle?.purchased_on ? "Edit dates" : "Add dates"}</button></div>
         <strong className="relationship-count">{togetherDays === null ? "—" : togetherDays.toLocaleString()}<span>{togetherDays === null ? "" : " days"}</span></strong>
-        <p>{vehicle?.purchased_on ? `Since you bought this car on ${formatVehicleDate(vehicle.purchased_on)}` : "Add the date you bought this car to start the count."}</p>
-        {vehicle?.first_drive_on && <p className="relationship-secondary">First drove it on {formatVehicleDate(vehicle.first_drive_on)}</p>}
+        <p>{vehicle?.purchased_on ? `Since you bought this car on ${formatVehicleDate(vehicle.purchased_on)}` : appStart ? `Since you added this car to Carmori on ${formatVehicleDate(appStart)}` : "Add a date to start the count."}</p>
+        {vehicle?.first_drive_on ? <p className="relationship-secondary">First drove it on {formatVehicleDate(vehicle.first_drive_on)}</p>
+          : appStart && <p className="relationship-secondary">First drive date unknown · tracking from {formatVehicleDate(appStart)}</p>}
       </div>
 
       <div className="relationship-metric issue-metric">
         <div className="issue-card-top"><h2>Days without a major issue</h2><strong>{issuesLoading ? "…" : issueFreeDays === null ? "—" : issueFreeDays.toLocaleString()}</strong></div>
         <p>{issuesLoading ? "Checking your records…" : !issuesAvailable ? "Could not load issue history. Try again." : latestIssue
           ? `Since the ${ISSUE_LABELS[latestIssue.kind].toLowerCase()} logged on ${formatVehicleDate(latestIssue.occurred_on)}.`
-          : vehicle?.major_issue_free_confirmed && vehicle.purchased_on
-            ? `Based on your confirmation since ${formatVehicleDate(vehicle.purchased_on)}.`
+          : vehicle?.major_issue_free_confirmed && (vehicle.purchased_on || appStart)
+            ? `Based on your confirmation since ${formatVehicleDate(vehicle.purchased_on ?? appStart)}.`
             : "Confirm your history or log a major issue to start this count."}</p>
         <p className="issue-scope">Reported accidents and major breakdowns only. Routine maintenance doesn't reset the count.</p>
         <div className="issue-actions">
-          {vehicle?.purchased_on && !issuesLoading && issuesAvailable && !issues.length && !vehicle.major_issue_free_confirmed && <button type="button" onClick={() => void confirmNoIssues()} disabled={busy}>Confirm no major issues since purchase</button>}
+          {vehicle && !issuesLoading && issuesAvailable && !issues.length && !vehicle.major_issue_free_confirmed && <button type="button" onClick={() => void confirmNoIssues()} disabled={busy}>Confirm no major issues since {vehicle.purchased_on ? "purchase" : "adding this car"}</button>}
           {!issuesLoading && !issuesAvailable && <button type="button" onClick={() => void onRefresh()} disabled={busy}>Retry</button>}
           <button type="button" onClick={() => setFormOpen((open) => !open)} disabled={!vehicle || busy}>{formOpen ? "Cancel" : "Log major issue"}</button>
         </div>

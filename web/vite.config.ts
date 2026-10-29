@@ -22,5 +22,5 @@ export default defineConfig({
       },
     },
   },
-  optimizeDeps: { exclude: ["onnxruntime-web"] },
+  optimizeDeps: { include: ["@ricky0123/vad-web", "onnxruntime-web/wasm"] },
 });

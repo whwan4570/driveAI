@@ -97,7 +97,7 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
     const tone: Tone = recommendation?.priority === "WARNING" || (percent !== null && percent <= 15) ? "due"
       : recommendation?.priority === "CHECK_SOON" || (percent !== null && percent <= 35) ? "soon"
       : recommendation?.priority === "ROUTINE" || percent !== null ? "good" : "unknown";
-    const label = recommendation?.priority === "WARNING" ? "Warning" : tone === "due" ? "Due" : tone === "soon" ? "Check soon" : tone === "good" ? "On track" : "Needs info";
+    const label = recommendation?.priority === "WARNING" ? "Warning" : tone === "due" ? "Due" : tone === "soon" ? "Check soon" : tone === "good" ? "On track" : "No estimate";
     return { record, interval, percent, recommendation, tone, label };
   };
 
@@ -105,25 +105,25 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
   const detail = selected ? rowData(selected) : null;
 
   return <section className="service-status-card" aria-label="Service interval status">
-    <div className="service-status-heading"><h2>Service intervals</h2><p>Schedule remaining and checks from your records</p></div>
+    <div className="service-status-heading"><h2>Service intervals</h2><p>Percentages need a dated service record and an interval.</p></div>
     <div className="service-status-list">
       {STATUS_COMPONENTS.map(({ id, label, short }) => {
         const { record, interval, percent, recommendation, tone, label: statusLabel } = rowData(id);
         const subtitle = recommendation?.priority === "CHECK_SOON" || recommendation?.priority === "WARNING" ? recommendation.title
           : record && interval ? `Last changed ${new Date(record.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-          : id === "washer_fluid" ? recommendation?.title || "Level not measured" : "Add last change and interval";
+          : id === "washer_fluid" ? recommendation?.title || "Level not measured" : "Add last service and interval";
         return <div className="service-status-row" key={id}>
           <button id={`status-detail-${id}`} type="button" className="service-status-trigger" onClick={() => { setSelected(id); setEditing(null); setError(null); }} aria-label={`${label}: ${statusLabel}. View details`} aria-haspopup="dialog">
             <span className="service-status-code">{short}</span>
             <span className="service-status-copy"><strong>{label}</strong><small>{loading ? "Checking records…" : subtitle}</small></span>
             <span className={`service-status-light ${tone}`} aria-hidden="true"/>
-            <span className={`service-status-value ${tone}`}>{loading ? "—" : percent === null ? statusLabel : `${percent}%`}</span>
+            <span className={`service-status-value ${tone}`}>{loading || percent === null ? "—" : `${percent}%`}</span>
           </button>
-          {id !== "washer_fluid" && <div className={`service-status-track ${tone}`} role="meter" aria-label={`${label} interval remaining`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Not set" : `${percent} percent remaining`}><span style={{ width: percent === null ? "0%" : `${percent}%` }}/></div>}
+          {id !== "washer_fluid" && percent !== null && <div className={`service-status-track ${tone}`} role="meter" aria-label={`${label} interval remaining`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={`${percent} percent remaining`}><span style={{ width: `${percent}%` }}/></div>}
         </div>;
       })}
     </div>
-    <p className="service-status-note">Percentages show the interval remaining, not actual part condition. Set your own intervals for each car.</p>
+    <p className="service-status-note">Estimates show your saved service interval remaining, not measured part condition.</p>
     {selectedItem && detail && <div className="service-status-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setEditing(null); } }}>
       <div className="service-status-dialog" role="dialog" aria-modal="true" aria-labelledby="service-status-dialog-title">
         <div className="service-status-dialog-top"><div><span className={`service-status-dialog-light ${detail.tone}`}/><span className="service-status-dialog-state">{detail.label}</span></div><button type="button" onClick={() => { setSelected(null); setEditing(null); }} aria-label="Close details">×</button></div>
@@ -136,12 +136,12 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
           <button className="service-status-save" type="submit" disabled={saving}>{saving ? "Saving…" : "Save schedule"}</button>
           <button className="service-status-secondary" type="button" onClick={() => setEditing(null)}>Back to details</button>
         </form> : <>
-          <p className="service-status-description">{detail.recommendation?.explanation ?? (detail.percent === null ? "Add your last change and service interval to see an estimate." : `${detail.percent}% of your chosen service interval remains.`)}</p>
+          <p className="service-status-description">{detail.recommendation?.explanation ?? (detail.percent === null ? "Add your last service and interval to see an estimate." : `${detail.percent}% of the saved service interval remains. This is not a condition measurement.`)}</p>
           {detail.record && detail.interval && <p className="service-status-dialog-meta">Last changed {new Date(detail.record.completed_at).toLocaleDateString("en-US", { dateStyle: "medium" })}{detail.record.odometer_km !== null ? ` · ${milesFromKm(detail.record.odometer_km)} mi` : ""}<br/>Your interval: {[detail.interval.months && `${detail.interval.months} months`, detail.interval.miles && `${detail.interval.miles.toLocaleString()} mi`].filter(Boolean).join(" or ")}</p>}
           {detail.recommendation && <div className="service-status-evidence"><strong>Based on</strong>{detail.recommendation.evidence.filter((item) => item.value !== "Not provided").map((item) => <span key={item.label}>{item.label}: {item.value}</span>)}</div>}
           {selected === "tires" && <button className="service-status-save" type="button" onClick={() => { setSelected(null); onTireInspection(); }}>Record tire inspection</button>}
           {selected === "washer_fluid" && <button className="service-status-save" type="button" onClick={() => { setSelected(null); onWasherGuide(); }} disabled={guideBusy}>Start guided check</button>}
-          {selected !== "washer_fluid" && <button className="service-status-secondary" type="button" onClick={() => { if (selected) edit(selected); }}>{detail.interval ? "Edit schedule" : "Set service schedule"}</button>}
+          {selected !== "washer_fluid" && <button className="service-status-secondary" type="button" onClick={() => { if (selected) edit(selected); }}>{detail.interval ? "Edit service interval" : "Add last service & interval"}</button>}
         </>}
       </div>
     </div>}

@@ -70,15 +70,12 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def check_relationship_dates(purchased_on: date | None, first_drive_on: date | None,
-                             major_issue_free_confirmed: bool) -> None:
+def check_relationship_dates(purchased_on: date | None, first_drive_on: date | None) -> None:
     today = utcnow().date()
     if (purchased_on and purchased_on > today) or (first_drive_on and first_drive_on > today):
         raise HTTPException(422, "vehicle dates cannot be in the future")
     if purchased_on and first_drive_on and first_drive_on < purchased_on:
         raise HTTPException(422, "first drive cannot be before purchase date")
-    if major_issue_free_confirmed and purchased_on is None:
-        raise HTTPException(422, "purchase date is needed to confirm issue-free history")
 
 
 class FrameIn(BaseModel):
@@ -215,6 +212,8 @@ class AskIn(BaseModel):
 class AskOut(BaseModel):
     text: str
     fact_ids: list[str]
+    source_url: str | None = None
+    source_label: str | None = None
 
 
 class BriefingIn(BaseModel):
@@ -230,7 +229,7 @@ class BriefingOut(BaseModel):
 
 class ManualRecordIn(BaseModel):
     vehicle_id: str
-    component: Literal["washer_fluid", "tires", "engine_oil", "brake_pads", "cabin_filter", "engine_air_filter"] = "washer_fluid"
+    component: Literal["washer_fluid", "tires", "engine_oil", "engine_oil_filter", "brake_pads", "brake_fluid", "transmission_fluid", "cabin_filter", "engine_air_filter", "spark_plugs", "engine_coolant", "drive_belt"] = "washer_fluid"
     event_type: Literal["inspection", "refill", "rotation", "replacement"] = "refill"
     completed_at: datetime = Field(default_factory=utcnow)
     odometer_km: int | None = Field(default=None, ge=0)
@@ -289,7 +288,7 @@ def create_app(
         # Vehicles saved before a vehicle-specific guide existed still get it.
         return vehicle, match_spec(vehicle.year, vehicle.make, vehicle.model) or spec
 
-    def image_identity(vehicle: VehicleProfile) -> tuple[int, str | None, str | None, str | None, str | None]:
+    def image_identity(vehicle: VehicleProfile) -> tuple[int, str | None, str | None, str | None, str | None, str | None]:
         return (vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.exterior_color)
 
     def can_generate(vehicle: VehicleProfile) -> bool:
@@ -389,7 +388,7 @@ def create_app(
         if spec is None or not spec.years[0] <= body.year <= spec.years[1]:
             raise HTTPException(422, "unsupported vehicle")
         spec = match_spec(body.year, body.make, body.model) or spec
-        check_relationship_dates(body.purchased_on, body.first_drive_on, body.major_issue_free_confirmed)
+        check_relationship_dates(body.purchased_on, body.first_drive_on)
         vehicle = VehicleProfile(
             vehicle_id=uuid.uuid4().hex,
             spec_id=spec.spec_id,
@@ -485,7 +484,7 @@ def create_app(
         updated = vehicle.model_copy(update=changes)
         matched = match_spec(updated.year, updated.make, updated.model)
         updated = updated.model_copy(update={"spec_id": matched.spec_id if matched else DEMO_SPEC.spec_id})
-        check_relationship_dates(updated.purchased_on, updated.first_drive_on, updated.major_issue_free_confirmed)
+        check_relationship_dates(updated.purchased_on, updated.first_drive_on)
         issues = store.list_major_issues(vehicle_id)
         if updated.major_issue_free_confirmed and issues:
             raise HTTPException(422, "cannot confirm no major issues while issues are logged")
@@ -585,7 +584,7 @@ def create_app(
         if (body.component == "washer_fluid" and body.event_type not in ("inspection", "refill")) or (
             body.component == "tires" and body.event_type not in ("inspection", "rotation", "replacement")
         ) or (
-            body.component in ("engine_oil", "brake_pads", "cabin_filter", "engine_air_filter") and body.event_type not in ("inspection", "replacement")
+            body.component in ("engine_oil", "engine_oil_filter", "brake_pads", "brake_fluid", "transmission_fluid", "cabin_filter", "engine_air_filter", "spark_plugs", "engine_coolant", "drive_belt") and body.event_type not in ("inspection", "replacement")
         ):
             raise HTTPException(422, "event type does not match component")
         if body.photo_data_url:

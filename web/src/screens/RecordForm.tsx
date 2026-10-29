@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { api, type Vehicle } from "../lib/api";
 import { photoFromFile } from "../lib/photos";
-import { MAINTENANCE_LABELS, SERVICE_COMPONENTS } from "../lib/serviceIntervals";
+import { MAINTENANCE_LABELS, SERVICE_COMPONENTS, type ServiceComponent } from "../lib/serviceIntervals";
 
-type Component = "washer_fluid" | "tires" | "engine_oil" | "brake_pads" | "cabin_filter" | "engine_air_filter";
+type Component = "washer_fluid" | ServiceComponent;
 type EventType = "inspection" | "refill" | "rotation" | "replacement";
 
 export function RecordForm({ vehicle, initialComponent, onSaved, onCancel }: {

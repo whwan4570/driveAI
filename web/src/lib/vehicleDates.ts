@@ -6,6 +6,13 @@ export function todayLocalISO(): string {
   return `${year}-${month}-${day}`;
 }
 
+export function localDateISO(timestamp: string | null | undefined): string | null {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function daysSince(isoDate: string | null | undefined): number | null {
   if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
   const [year, month, day] = isoDate.split("-").map(Number);

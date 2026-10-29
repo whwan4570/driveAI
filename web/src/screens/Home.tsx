@@ -44,16 +44,33 @@ function priorityLabel(priority: string): string {
   return ({ WARNING: "Warning", CHECK_SOON: "Check soon", INFORMATION_NEEDED: "Needs info", ROUTINE: "Routine" } as Record<string, string>)[priority] ?? priority;
 }
 
-export function Home({ vehicleId, started, onStart, onStartTask }: {
+function voiceStartMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") return "Microphone access is blocked. Allow it for this site and try again.";
+    if (error.name === "NotFoundError") return "No microphone was found. Connect one and try again.";
+    if (error.name === "NotReadableError") return "The microphone is busy. Close other apps using it and try again.";
+  }
+  return "Voice couldn't start. Reload the page and try again.";
+}
+
+export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   vehicleId: string;
   started: boolean;
   onStart: () => Promise<void>;
+  onStop: () => Promise<void>;
   onStartTask: () => Promise<void>;
 }) {
   const voice = useVoice();
   const [tab, setTab] = useState<Tab>("home");
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [typedQuestion, setTypedQuestion] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState<number | null>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
+  const composerInputRef = useRef<HTMLInputElement>(null);
+  const visualHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
+  const visualWidthRef = useRef(window.innerWidth);
   const [asking, setAsking] = useState(false);
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [majorIssues, setMajorIssues] = useState<MajorIssue[]>([]);
@@ -70,6 +87,13 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   const [memoryLoading, setMemoryLoading] = useState(true);
   const [careLoading, setCareLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuMounted, setMenuMounted] = useState(false);
+  const [menuView, setMenuView] = useState<"menu" | "my-profile" | "settings">("menu");
+  const menuPanelRef = useRef<HTMLElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuCloseTimerRef = useRef<number | null>(null);
+  const menuTouchXRef = useRef<number | null>(null);
   const [recordOpen, setRecordOpen] = useState(false);
   const [tireOpen, setTireOpen] = useState(false);
   const [recordComponent, setRecordComponent] = useState<"washer_fluid" | "tires">("washer_fluid");
@@ -97,8 +121,53 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   const gateRef = useRef(new DrivingGate());
   const busyRef = useRef(false);
   const playBriefingRef = useRef<(source: "manual" | "auto") => Promise<void>>(async () => undefined);
+  const lastSpokenRef = useRef<string | null>(null);
   const documentReturnTabRef = useRef<Tab>("home");
-  const add = (who: Caption["who"], text: string) => setCaptions((c) => [...c, { who, text }]);
+  const add = (who: Caption["who"], text: string, sourceUrl?: string, sourceLabel?: string) => setCaptions((c) => [...c, { who, text, sourceUrl, sourceLabel }]);
+
+  useEffect(() => {
+    if (!composerMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setComposerMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setComposerMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [composerMenuOpen]);
+
+  useEffect(() => {
+    if (tab !== "assistant") { setKeyboardOffset(null); return; }
+    const viewport = window.visualViewport;
+    const update = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const focused = document.activeElement === composerInputRef.current;
+      if (window.innerWidth !== visualWidthRef.current) {
+        visualWidthRef.current = window.innerWidth;
+        visualHeightRef.current = height;
+      } else if (!focused) {
+        visualHeightRef.current = Math.max(visualHeightRef.current, height);
+      }
+      const covered = Math.max(0, window.innerHeight - (viewport?.offsetTop ?? 0) - height);
+      const keyboardOpen = focused && window.matchMedia("(pointer: coarse)").matches &&
+        (covered > 100 || visualHeightRef.current - height > 120);
+      setKeyboardOffset(keyboardOpen ? covered : null);
+    };
+    update();
+    viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [tab, composerFocused]);
 
   const refreshData = async () => {
     setMemoryLoading(true);
@@ -184,14 +253,67 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     };
   }, []);
 
-  const say = async (text: string) => {
-    add("carmori", text);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    menuPanelRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+        return;
+      }
+      if (event.key !== "Tab" || !menuPanelRef.current) return;
+      const buttons = [...menuPanelRef.current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+      if (!buttons.length) return;
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen, menuView]);
+
+  useEffect(() => () => {
+    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
+  }, []);
+
+  const openMenu = () => {
+    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
+    setNotificationsOpen(false);
+    setMenuView("menu");
+    setMenuMounted(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => setMenuOpen(true)));
+  };
+
+  const closeMenu = () => {
+    setMenuOpen(false);
+    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
+    menuCloseTimerRef.current = window.setTimeout(() => {
+      setMenuMounted(false);
+      setMenuView("menu");
+      menuCloseTimerRef.current = null;
+    }, 240);
+    menuButtonRef.current?.focus();
+  };
+
+  const say = async (text: string, sourceUrl?: string, sourceLabel?: string) => {
+    add("carmori", text, sourceUrl, sourceLabel);
+    lastSpokenRef.current = text;
     await voice.speak(text);
   };
 
   const goToTab = (next: Tab) => {
+    setComposerMenuOpen(false);
     setProfileOpen(false);
     setNotificationsOpen(false);
+    setMenuOpen(false);
+    setMenuMounted(false);
+    setMenuView("menu");
     setTab(next);
     if (next === "status") setDriveSummary(metricsRef.current!.summary());
     document.documentElement.scrollTop = 0;
@@ -214,11 +336,12 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     setError(null);
     setBusy(true);
     setBriefingState("loading");
-    if (source === "manual") { voice.unlockTts(); gateRef.current.markPlayed(); }
+    if (source === "manual") voice.unlockTts();
     try {
       const { text } = await api.briefing(vehicleId);
       setBriefingState("speaking");
       await say(text);
+      if (source === "manual") gateRef.current.markPlayed();
       setBriefingState("played");
       if (source === "auto") setAutoMessage("Played for this drive");
     } catch {
@@ -237,8 +360,9 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     try {
       if (!started) await onStart();
       goToTab("assistant");
-    } catch {
-      setError("Voice is unavailable. Check microphone permission and your connection.");
+    } catch (error) {
+      console.warn("Voice start failed", error);
+      setError(voiceStartMessage(error));
     } finally {
       setBusy(false);
     }
@@ -384,9 +508,14 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
   };
 
   useUtterances(async (text) => {
+    setError(null);
     add("me", text);
     goToTab("assistant");
     try {
+      if (/^(?:please )?(?:brief me|give me (?:my |the )?briefing|what(?:'s| is) (?:my |the )?briefing|play (?:my |the )?briefing)[.!?]?$/i.test(text.trim())) {
+        await playBriefing("manual");
+        return;
+      }
       const parsed = parseUtterance(text);
       if (parsed.kind === "start_task") {
         await say("Mount your phone so the washer fluid inlet is in view.");
@@ -394,13 +523,18 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
         return;
       }
       if (parsed.kind === "empty") return;
-      const answer = await api.ask(vehicleId, parsed.kind === "question" ? parsed.text : text);
-      await say(answer.text);
-      setRecords(await api.memory(vehicleId));
+      if (parsed.kind === "session") {
+        if (parsed.intent === "REPEAT") await say(lastSpokenRef.current ?? "Nothing to repeat yet.");
+        else await say("Open the washer guide to use that command.");
+        return;
+      }
+      const answer = await api.ask(vehicleId, parsed.text);
+      await say(answer.text, answer.source_url ?? undefined, answer.source_label ?? undefined);
+      void api.memory(vehicleId).then(setRecords).catch(() => undefined);
     } catch {
       setError("I could not get an answer. Please ask again.");
     }
-  });
+  }, (issue) => setError(issue === "empty" ? "I didn't catch that. Please try again." : "Voice transcription failed. Check your connection and try again."));
 
   const askTypedQuestion = async (event: FormEvent) => {
     event.preventDefault();
@@ -411,7 +545,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     setAsking(true);
     try {
       const answer = await api.ask(vehicleId, question);
-      add("carmori", answer.text);
+      add("carmori", answer.text, answer.source_url ?? undefined, answer.source_label ?? undefined);
     } catch {
       setError("I could not get an answer. Please try again.");
     } finally {
@@ -440,11 +574,11 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     { id: "history", label: "Glove box", icon: "file" },
   ];
 
-  return <div className="app-shell">
-    <main className="screen home-screen">
+  return <div className={`app-shell${keyboardOffset !== null ? " assistant-keyboard-open" : ""}`}>
+    <main className={`screen home-screen${tab === "assistant" ? " assistant-screen" : ""}`}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div>
-        <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">Demo Mode</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={18}/>{notificationItems.length + documentAlerts.length > 0 && <span className="topbar-alert-count">{notificationItems.length + documentAlerts.length}</span>}</button><button className="profile-button" type="button" onClick={() => setProfileOpen(true)} aria-label="Edit vehicle" title="Edit vehicle"><Icon name="car" size={19}/></button></div>
+        <div className="topbar-right">{(demoMode || vehicle?.profile_source === "demo") && <span className="demo-chip">{demoMode ? "Demo Mode" : "Sample vehicle"}</span>}<button className="topbar-alert" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-controls="vehicle-notifications" title="Notifications"><Icon name="bell" size={20}/>{notificationItems.length + documentAlerts.length > 0 && <span className="topbar-alert-count">{notificationItems.length + documentAlerts.length}</span>}</button><button ref={menuButtonRef} className="profile-button" type="button" onClick={openMenu} aria-label="Open menu" aria-expanded={menuOpen} aria-controls="carmori-side-menu" title="Menu"><Icon name="menu" size={22}/></button></div>
       </header>
 
       {notificationsOpen && <section className="notifications-panel" id="vehicle-notifications" aria-label="Vehicle notifications">
@@ -462,7 +596,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
         <p className="eyebrow home-kicker">YOUR DRIVE, REMEMBERED</p>
         <section className="vehicle-briefing-card" aria-label="My vehicle and briefing">
           <div className="vehicle-briefing-top">
-            <div className="vehicle-briefing-copy"><h1>{vehicle?.nickname || vehicleName(vehicle)}</h1>{vehicle?.nickname && <p className="vehicle-model">{vehicleName(vehicle)}</p>}<p className="vehicle-mileage">{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p><button className="vehicle-edit-link" type="button" onClick={() => setProfileOpen(true)}>Edit vehicle <Icon name="chevron" size={15}/></button></div>
+            <div className="vehicle-briefing-copy"><h1>{vehicle?.nickname || vehicleName(vehicle)}</h1>{vehicle?.nickname && <p className="vehicle-model">{vehicleName(vehicle)}</p>}<p className="vehicle-mileage">{vehicle?.odometer_km === null || !vehicle ? "Odometer not set" : `${Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} mi`}</p></div>
             <div className="vehicle-photo-stage"><VehiclePhoto vehicle={vehicle}/></div>
           </div>
           {vehicle?.image_status === "failed" && <div className="vehicle-image-error" role="status"><span>{vehicle.image_error || "Vehicle image unavailable."}</span><button type="button" onClick={() => void retryImage()} disabled={imageRetrying}>{imageRetrying ? "Trying…" : "Retry"}</button></div>}
@@ -474,7 +608,7 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
           {briefingState !== "idle" && <span className="drive-played-note" aria-live="polite">{briefingState === "loading" ? "Preparing briefing…" : briefingState === "speaking" ? "Speaking now…" : "Briefing played"}</span>}
           </div>
         </section>
-        <section className="driving-insights-card"><div className="driving-insights-heading"><h2>Driving insights</h2><button type="button" onClick={toggleStatusTracking}>{trackingEnabled ? "Stop tracking" : "Start tracking"}</button></div><div className="driving-insights-grid"><div><strong>{miles(driveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City</span></div></div><p>{driveSummary.weekTrackedDays ? `${driveSummary.weekTrackedDays} tracked ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} · Phone GPS` : trackingEnabled ? "Tracking with phone GPS" : "Track a drive to see your mileage"}{care?.environment.status === "available" ? ` · 7-day rain: ${care.environment.rainfall_mm?.toFixed(1)} mm (Open-Meteo)` : ""}</p></section>
+        <section className="driving-insights-card"><div className="driving-insights-heading"><h2>Driving insights</h2></div><div className="driving-insights-grid"><div><strong>{miles(driveSummary.weekMeters)}</strong><span>Past 7 days</span></div><div><strong>{weekHighway === null ? "—" : `${weekHighway}%`}</strong><span>Highway</span></div><div><strong>{weekHighway === null ? "—" : `${100 - weekHighway}%`}</strong><span>City</span></div></div><p>{driveSummary.weekTrackedDays ? `${driveSummary.weekTrackedDays} tracked ${driveSummary.weekTrackedDays === 1 ? "day" : "days"} · Phone GPS` : trackingEnabled ? "Tracking with phone GPS" : "Track a drive to see your mileage"}{care?.environment.status === "available" ? ` · 7-day rain: ${care.environment.rainfall_mm?.toFixed(1)} mm (Open-Meteo)` : ""}</p></section>
         <section className="care-section" aria-label="Your care priorities">
           <div className="care-section-heading"><h2>Recommended checks</h2><button type="button" onClick={() => void refreshData()} aria-label="Refresh recommended checks"><Icon name="refresh" size={17}/></button></div>
           {careLoading && <div className="care-loading">Reviewing your vehicle and maintenance history…</div>}
@@ -499,7 +633,6 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
             <div><span>Speed now</span><strong>{mph(driveSummary.speedMps)}</strong><small>Current estimate</small></div>
           </div>
           <p className="status-mileage-help">{driveSummary.trackedDays ? `Typical day averages ${driveSummary.trackedDays} tracked ${driveSummary.trackedDays === 1 ? "day" : "days"} in the past 30 days.` : "Typical day appears after a previous day has been tracked."} Distance and speed are phone estimates while tracking is on.</p>
-          <button className={`status-track-button${trackingEnabled ? " is-tracking" : ""}`} type="button" onClick={toggleStatusTracking}><Icon name={trackingEnabled ? "pause" : "status"} size={18}/>{trackingEnabled ? "Stop drive tracking" : "Start drive tracking"}</button>
           <p className="status-tracking-message" role="status"><span className={trackingEnabled ? "status-tracking-dot active" : "status-tracking-dot"}/>{trackingMessage}</p>
         </section>
         <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={care} loading={careLoading}/></Suspense>
@@ -507,12 +640,13 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
       </>}
 
       {!profileOpen && tab === "assistant" && <>
-        <section className="assistant-hero"><span className="assistant-orb"><Icon name="mic" size={25}/></span><strong>{started ? "Listening" : "Voice is off"}</strong><p>{started ? "Ask a question about your car" : "Start voice chat to use the microphone"}</p></section>
-        <div className="suggestions"><span>Try asking</span><p>“Why check washer fluid?”</p><p>“What did I do earlier?”</p><p>“Where do I add washer fluid?”</p></div>
         <Captions items={captions}/>
-        <form className="assistant-compose" onSubmit={(event) => void askTypedQuestion(event)}><input aria-label="Ask Carmori a question" placeholder="Ask about your car…" value={typedQuestion} onChange={(event) => setTypedQuestion(event.target.value)} maxLength={500}/><button type="submit" disabled={asking || !typedQuestion.trim()}>{asking ? "Asking…" : "Ask"}</button></form>
-        {!started && <button className="primary action-button" type="button" onClick={() => void startVoiceChat()} disabled={busy}><Icon name="mic" size={20}/>Start voice chat</button>}
-        {started && <button className="secondary action-button" type="button" onClick={() => void playBriefing("manual")} disabled={busy}><Icon name="volume" size={20}/>Replay briefing</button>}
+        <form ref={composerRef} className="assistant-compose" style={keyboardOffset !== null ? { bottom: `${keyboardOffset + 8}px` } : undefined} onSubmit={(event) => void askTypedQuestion(event)}>
+          <button className="assistant-plus" type="button" onClick={() => setComposerMenuOpen((open) => !open)} aria-label="More actions" aria-expanded={composerMenuOpen} aria-controls="assistant-composer-menu"><Icon name="plus" size={20}/></button>
+          <input ref={composerInputRef} aria-label="Ask Carmori a question" placeholder="Ask about your car…" value={typedQuestion} onChange={(event) => setTypedQuestion(event.target.value)} onFocus={() => { setComposerFocused(true); setComposerMenuOpen(false); if (started) void onStop(); }} onBlur={() => setComposerFocused(false)} maxLength={500}/>
+          {typedQuestion.trim() ? <button className="assistant-send" type="submit" disabled={asking} aria-label="Send question">{asking ? "…" : "Ask"}</button> : !composerFocused && <button className={`assistant-mic${started ? " is-listening" : ""}`} type="button" onClick={() => void (started ? onStop() : startVoiceChat())} disabled={busy} aria-label={started ? "Stop listening" : "Start voice chat"} aria-pressed={started}><Icon name={started ? "pause" : "mic"} size={22}/></button>}
+          {composerMenuOpen && <div className="assistant-composer-menu" id="assistant-composer-menu"><button type="button" onClick={() => { setComposerMenuOpen(false); goToTab("guide"); }}><Icon name="camera" size={18}/>Camera guide</button><button type="button" onClick={() => { setComposerMenuOpen(false); openDocuments(); }}><Icon name="file" size={18}/>Add document</button></div>}
+        </form>
       </>}
 
       {!profileOpen && tab === "guide" && <>
@@ -540,5 +674,26 @@ export function Home({ vehicleId, started, onStart, onStartTask }: {
     </main>
     {!profileOpen && tab !== "assistant" && tab !== "documents" && <button className={`floating-mic${fabHidden ? " is-hidden" : ""}`} type="button" onClick={() => void startVoiceChat()} disabled={busy} aria-label="Ask by voice" aria-hidden={fabHidden} tabIndex={fabHidden ? -1 : 0} title="Ask by voice"><Icon name="mic" size={25}/></button>}
     <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id || (tab === "documents" && item.id === "history") ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
+    {menuMounted && <>
+      <div className={`side-menu-backdrop${menuOpen ? " is-open" : ""}`} onClick={closeMenu} aria-hidden="true"/>
+      <aside ref={menuPanelRef} className={`side-menu${menuOpen ? " is-open" : ""}`} id="carmori-side-menu" role="dialog" aria-modal="true" aria-hidden={!menuOpen} aria-label={menuView === "menu" ? "Menu" : menuView === "my-profile" ? "My profile" : "Settings"} onTouchStart={(event) => { menuTouchXRef.current = event.touches[0]?.clientX ?? null; }} onTouchEnd={(event) => { if (menuTouchXRef.current !== null && event.changedTouches[0]?.clientX - menuTouchXRef.current > 70) closeMenu(); menuTouchXRef.current = null; }}>
+        <div className="side-menu-header"><span>{menuView === "menu" ? "Carmori" : menuView === "my-profile" ? "My profile" : "Settings"}</span><button type="button" onClick={closeMenu} aria-label="Close menu"><Icon name="close" size={20}/></button></div>
+        {menuView === "menu" ? <>
+          <button className="side-menu-identity" type="button" onClick={() => setMenuView("my-profile")}><span className="side-menu-avatar"><Icon name="profile" size={25}/></span><span><strong>My profile</strong><small>Local prototype</small></span></button>
+          <nav className="side-menu-links" aria-label="Profile menu">
+            <button type="button" onClick={() => { closeMenu(); setProfileOpen(true); }}><Icon name="car" size={22}/><span>Car profile</span><Icon name="chevron" size={17}/></button>
+          </nav>
+          <div className="side-menu-footer"><button type="button" onClick={() => setMenuView("settings")}><Icon name="settings" size={22}/><span>Settings</span><Icon name="chevron" size={17}/></button></div>
+        </> : <>
+          <button className="side-menu-back" type="button" onClick={() => setMenuView("menu")}>‹ Menu</button>
+          {menuView === "my-profile" ? <p className="side-menu-note">Personal profile is not set up in this prototype.</p> : <div className="side-menu-settings">
+            <strong>Drive tracking</strong>
+            <p>Uses phone location while this page is open.</p>
+            <button className={`side-menu-track${trackingEnabled ? " is-tracking" : ""}`} type="button" onClick={toggleStatusTracking}><Icon name={trackingEnabled ? "pause" : "status"} size={19}/>{trackingEnabled ? "Stop drive tracking" : "Start drive tracking"}</button>
+            <p className="side-menu-track-status" role="status"><span className={trackingEnabled ? "status-tracking-dot active" : "status-tracking-dot"}/>{trackingMessage}</p>
+          </div>}
+        </>}
+      </aside>
+    </>}
   </div>;
 }

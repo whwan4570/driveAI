@@ -14,6 +14,7 @@ __pycache__/
 web/node_modules/
 web/dist/
 web/public/vad/
+web/src/vendor/
 *.tsbuildinfo
 
 # 실차 원본 영상·프레임은 저장소에 올리지 않는다 (클립 JSON만 커밋)
