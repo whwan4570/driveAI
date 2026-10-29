@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .models import MaintenanceRecord, VehicleProfile
+from .vehicles import VehicleSpec
 from .weather import EnvironmentContext
 
 
@@ -22,7 +23,7 @@ Component = Literal["washer_fluid", "tires"]
 class Evidence(BaseModel):
     label: str
     value: str
-    source: Literal["vehicle_profile", "maintenance_record", "user_driving_profile", "phone_gps", "external_weather"]
+    source: Literal["vehicle_profile", "maintenance_record", "user_driving_profile", "phone_gps", "external_weather", "owner_manual"]
     record_id: str | None = None
 
 
@@ -38,7 +39,7 @@ class Recommendation(BaseModel):
     last_recorded_at: datetime | None
     calculated_at: datetime
     source: Literal["contextual_inspection_rule"] = "contextual_inspection_rule"
-    manufacturer_guidance_status: Literal["unavailable"] = "unavailable"
+    manufacturer_guidance_status: Literal["unavailable", "owner_manual"] = "unavailable"
 
 
 def _latest(records: list[MaintenanceRecord], component: Component) -> MaintenanceRecord | None:
@@ -48,7 +49,7 @@ def _latest(records: list[MaintenanceRecord], component: Component) -> Maintenan
 
 def calculate_recommendations(
     vehicle: VehicleProfile, records: list[MaintenanceRecord], now: datetime,
-    environment: EnvironmentContext | None = None,
+    environment: EnvironmentContext | None = None, spec: VehicleSpec | None = None,
 ) -> list[Recommendation]:
     odo = Evidence(
         label="Odometer",
@@ -89,10 +90,16 @@ def calculate_recommendations(
             label="Last confirmed washer action", value=f"{washer.event_type} on {washer.completed_at.date().isoformat()}",
             source="maintenance_record", record_id=washer.record_id,
         ))
+    manual_check = next((note for note in spec.manual_notes if note.id == "manual_washer_check"), None) if spec else None
+    if manual_check:
+        washer_evidence.append(Evidence(
+            label="Owner's manual", value=f"Check washer fluid at each fuel stop (p. {manual_check.page})", source="owner_manual",
+        ))
     recommendations = [Recommendation(
         id="washer_fluid", component="washer_fluid", priority=washer_priority,
         title=washer_title, explanation=washer_explanation, evidence=washer_evidence,
-        unknown=["Current fluid level", "Manufacturer-specific washer guidance"],
+        unknown=["Current fluid level"] if manual_check else ["Current fluid level", "Manufacturer-specific washer guidance"],
+        manufacturer_guidance_status="owner_manual" if manual_check else "unavailable",
         suggested_action="washer_guide", last_recorded_at=washer.completed_at if washer else None,
         calculated_at=now,
     )]

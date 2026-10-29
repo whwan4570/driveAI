@@ -69,6 +69,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     api.vehicleSpecs()
       .then((list) => {
         setSpecs(list);
+        // The server switches to a vehicle-specific guide when year, make and model match one.
         if (list[0]) setSpecId(list[0].spec_id);
       })
       .catch(() => setError("Could not connect to the server. Start it and try again."));
@@ -260,7 +261,6 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}{scanResult.sale_date ? " Confirm the suggested sale date is when you bought this car." : ""}</p></>
         : <><h2>Vehicle details</h2><p className="review-note">Add your car to personalize care suggestions.</p></>}
       <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); setBodyStyle(inferredCivicBodyStyle(next.model)); setTrim(""); }}/>
-      {specs.length > 1 && <label>Vehicle guide<select value={specId} onChange={(e) => setSpecId(e.target.value)}>{specs.map((s) => <option key={s.spec_id} value={s.spec_id}>{s.display_name}</option>)}</select></label>}
       <label>Model year<input type="number" min={specs.find((item) => item.spec_id === specId)?.years[0] ?? 1981} max={specs.find((item) => item.spec_id === specId)?.years[1] ?? 2035} value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="Year" required/></label>
       <VehicleConfigurationFields make={make} model={model} bodyStyle={bodyStyle} onBodyStyleChange={setBodyStyle} trim={trim} onTrimChange={setTrim}/>
       <label>Car nickname <span className="optional">optional</span><input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={60} placeholder="e.g. Sunny"/></label>

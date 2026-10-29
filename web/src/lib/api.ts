@@ -68,7 +68,7 @@ export interface Vehicle {
 export interface CareEvidence {
   label: string;
   value: string;
-  source: "vehicle_profile" | "maintenance_record" | "user_driving_profile" | "phone_gps" | "external_weather";
+  source: "vehicle_profile" | "maintenance_record" | "user_driving_profile" | "phone_gps" | "external_weather" | "owner_manual";
   record_id: string | null;
 }
 
@@ -84,7 +84,7 @@ export interface CareRecommendation {
   last_recorded_at: string | null;
   calculated_at: string;
   source: "contextual_inspection_rule";
-  manufacturer_guidance_status: "unavailable";
+  manufacturer_guidance_status: "unavailable" | "owner_manual";
 }
 
 export interface CareResponse {

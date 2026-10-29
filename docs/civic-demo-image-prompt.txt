@@ -1,5 +1,0 @@
-Tool: built-in image_gen imagegen (image edit, transparent background)
-Reference image: /Users/joon/.codex/generated_images/01a17c3b-1700-7e73-8bbe-38edddb2e19d/exec-384018f5-68d8-4546-b51d-c7858b04b0fd.png
-
-Prompt:
-Edit this image into a photorealistic, uncharacterized vehicle product photo. Remove the large cartoon eyes, eyebrows, and smiling mouth completely. Replace the windshield with realistic dark glass and subtle interior, and restore the front bumper and grille to normal production-car details. Preserve the silver metallic 2021 Honda Civic sedan body, compact tenth-generation Civic proportions, sporty swept roofline, four doors, angular headlights, wheel design, front-right three-quarter viewing angle, and full-car framing. Make it look like a clean real automobile photograph, not an illustration or animated character. Isolate the whole car with true transparent background and clean edges; no scenery, floor, text, watermark, person, or extra vehicle.

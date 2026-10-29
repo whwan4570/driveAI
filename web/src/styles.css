@@ -230,12 +230,12 @@ h2,h1,p{overflow-wrap:break-word}
 .status-vehicle-copy h2{color:#fff}.status-vehicle-copy p{color:#d4e1e5}.status-vehicle-copy .section-overline{color:#9edfe0}
 @media(max-width:370px){.vehicle-briefing-copy h1{font-size:24px}.vehicle-briefing-play .drive-briefing-badge{display:none}}
 
-/* Vehicle image: generated image first, matching demo fallback for the Civic sample. */
+/* Vehicle image: generated image first, then the Sonata sample photo for the demo car. */
 .vehicle-briefing-top{display:grid;grid-template-columns:minmax(0,45%) minmax(0,55%);align-items:center;min-height:164px;padding:17px 11px 15px 17px}
 .vehicle-briefing-copy h1{font-size:clamp(21px,5.8vw,27px);line-height:1.12}
 .vehicle-photo-stage{position:relative;z-index:1;min-width:0;height:135px;display:flex;align-items:center;justify-content:center}
 .vehicle-photo{display:block;width:100%;height:100%;object-fit:contain}
-.vehicle-photo-stage .vehicle-photo.is-demo{width:108%;height:135px;max-width:none;filter:drop-shadow(0 12px 9px #0017289c)}
+.vehicle-photo.is-sample-photo{object-fit:cover;border-radius:12px;box-shadow:0 10px 18px #0017285c}
 .vehicle-photo-stage .vehicle-photo.is-generated{width:112%;max-width:none;height:135px;object-fit:contain;filter:drop-shadow(0 12px 9px #0017289c)}
 .vehicle-photo-label{position:absolute;right:0;bottom:-1px;color:#b4d1d8;font-size:8px;font-weight:800;letter-spacing:1px}
 .vehicle-photo-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;height:112px;border:1px dashed #9bcbce8a;border-radius:13px;background:#ffffff10;color:#b9dadd;text-align:center}
@@ -243,7 +243,6 @@ h2,h1,p{overflow-wrap:break-word}
 .status-vehicle-card{min-height:132px;padding:18px;display:flex;align-items:center}
 .status-vehicle-copy{max-width:48%}
 .status-vehicle-photo{position:absolute;right:8px;top:9px;bottom:9px;width:49%;display:flex;align-items:center;justify-content:center}
-.status-vehicle-photo .vehicle-photo.is-demo{width:113%;height:100%;max-width:none;filter:drop-shadow(0 9px 7px #00172899)}
 .status-vehicle-photo .vehicle-photo.is-generated{width:113%;max-width:none;height:100%;object-fit:contain;filter:drop-shadow(0 9px 7px #00172899)}
 .status-vehicle-photo .vehicle-photo-label{bottom:0;right:1px}
 .status-vehicle-photo .vehicle-photo-empty{height:100%}
