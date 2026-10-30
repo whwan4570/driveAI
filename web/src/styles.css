@@ -856,3 +856,8 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .arw-tire-guide span{position:absolute;left:50%;top:-38px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000000b3;font-size:13px;font-weight:700;white-space:nowrap}
 .arw .k-form label{color:var(--k-text-2)}
 .arw-card>.arw-primary,.arw-card>.arw-secondary{flex:none;width:100%}
+/* iOS Safari draws date fields with its own height, minimum width and centered text; keep them like the other fields. */
+.k-form input[type=date],.k-form input[type=time],.k-form input[type=datetime-local]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;max-width:100%;height:52px;min-height:52px;line-height:26px;text-align:left}
+.k-form input[type=date]::-webkit-date-and-time-value,.k-form input[type=datetime-local]::-webkit-date-and-time-value{margin:0;text-align:left}
+.k-form input[type=date]::-webkit-datetime-edit,.k-form input[type=datetime-local]::-webkit-datetime-edit{padding:0}
+.k-form .review-fields>label,.k-form .review-fields>*{min-width:0}
