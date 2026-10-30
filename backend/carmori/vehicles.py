@@ -46,14 +46,15 @@ DEMO_SPEC = VehicleSpec(
 
 # 2014 Hyundai Sonata (YF, US), base GLS 2.4 GDI. Pages are the printed page numbers of the
 # 2014 Sonata Owner's Manual (US edition). The manual does not list a washer reservoir capacity
-# or a cap color, so neither is stated here.
+# or a cap color. The blue cap comes from a photo of the team's own demo car, not the manual.
 SONATA_2014_SPEC = VehicleSpec(
     spec_id="hyundai_sonata_2014",
     display_name="2014 Hyundai Sonata",
     years=(2014, 2014),
     inlet_description=(
         "Washer reservoir filler neck at the front of the engine compartment on the passenger side, "
-        "beside the engine coolant reservoir. Round flip-up cap with the windshield washer symbol."
+        "beside the engine coolant reservoir and in front of it. Round flip-up blue cap with the "
+        "windshield washer symbol on the demo car."
     ),
     manual_ref="2014 Hyundai Sonata Owner's Manual (US), pages 4-74, 4-82, 7-2, 7-5, 7-27 and 8-3",
     washer_label_terms=WASHER_LABEL_TERMS,
