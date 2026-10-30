@@ -1,4 +1,5 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import visionWasmModuleUrl from "@mediapipe/tasks-vision/vision_wasm_module_internal.js?url";
 
 type Point = { x: number; y: number };
 type Incoming = { type: "init" } | { type: "frame"; bitmap: ImageBitmap; timestamp: number };
@@ -13,6 +14,9 @@ self.onmessage = async (event: MessageEvent<Incoming>) => {
   if (message.type === "init") {
     try {
       const wasm = await FilesetResolver.forVisionTasks("/mediapipe/wasm", true);
+      // Vite cannot dynamically import a JS module from public/ in development.
+      // Keep the WASM binary local, but let Vite serve the loader as an asset.
+      wasm.wasmLoaderPath = visionWasmModuleUrl;
       tracker = await HandLandmarker.createFromOptions(wasm, {
         baseOptions: { modelAssetPath: "/mediapipe/hand_landmarker.task", delegate: "CPU" },
         runningMode: "VIDEO",
