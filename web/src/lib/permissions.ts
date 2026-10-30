@@ -1,13 +1,13 @@
-// Carmori's own on/off switches for location, microphone and camera, plus the browser's answer.
+// Carmori's own on/off switches for location, microphone, camera and compass, plus the browser's answer.
 // A page cannot revoke a permission the browser already granted, so "off" means Carmori stops
 // using that sensor; "on" asks the browser when it has not been asked yet.
 
-export type AppPermission = "location" | "microphone" | "camera";
+export type AppPermission = "location" | "microphone" | "camera" | "motion";
 export type BrowserPermission = "granted" | "denied" | "prompt" | "unknown";
 export type PermissionSettings = Record<AppPermission, boolean>;
 
 const KEY = "carmori:permissions";
-const DEFAULTS: PermissionSettings = { location: true, microphone: true, camera: true };
+const DEFAULTS: PermissionSettings = { location: true, microphone: true, camera: true, motion: true };
 
 export function readPermissionSettings(): PermissionSettings {
   try {
@@ -25,6 +25,8 @@ export function savePermissionSetting(permission: AppPermission, enabled: boolea
 }
 
 export async function browserPermission(permission: AppPermission): Promise<BrowserPermission> {
+  // Browsers do not report the compass permission; iOS asks for it the first time it is used.
+  if (permission === "motion") return "unknown";
   try {
     const name = (permission === "location" ? "geolocation" : permission) as PermissionName;
     return (await navigator.permissions.query({ name })).state;
@@ -35,6 +37,11 @@ export async function browserPermission(permission: AppPermission): Promise<Brow
 
 /** Asks the browser once. Resolves false only when the user or browser blocks it. */
 export async function requestBrowserPermission(permission: AppPermission): Promise<boolean> {
+  if (permission === "motion") {
+    const orientation = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+    if (typeof orientation.requestPermission !== "function") return true;
+    try { return (await orientation.requestPermission()) === "granted"; } catch { return false; }
+  }
   if (permission === "location") {
     if (!navigator.geolocation) return false;
     return new Promise((resolve) => navigator.geolocation.getCurrentPosition(

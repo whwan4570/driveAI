@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { FindCarAR } from "../components/FindCarAR";
 import { Icon, type IconName } from "../components/Icons";
+import { requestBrowserPermission } from "../lib/permissions";
 import { api, type CareResponse, type WasherShoppingPick } from "../lib/api";
 
 type ParkingSpot = { lat: number; lon: number; accuracy: number; savedAt: string; note: string };
@@ -76,11 +78,12 @@ function SavedPlacesSection({ storageKey, title, subtitle, icon, mapsQuery, noun
   </section>;
 }
 
-export function Places({ vehicleId, care, onAskMuse, locationAllowed }: { vehicleId: string; care: CareResponse | null; onAskMuse: () => void; locationAllowed: boolean }) {
+export function Places({ vehicleId, care, onAskMuse, locationAllowed, cameraAllowed, compassAllowed }: { vehicleId: string; care: CareResponse | null; onAskMuse: () => void; locationAllowed: boolean; cameraAllowed: boolean; compassAllowed: boolean }) {
   const parkingKey = `carmori:parking:${vehicleId}`;
   const [parking, setParking] = useState<ParkingSpot | null>(() => readLocal(parkingKey, null));
   const [parkingNote, setParkingNote] = useState(() => parking?.note ?? "");
   const [finding, setFinding] = useState(false);
+  const [arOpen, setArOpen] = useState(false);
   const [distance, setDistance] = useState<string | null>(null);
   const [parkingError, setParkingError] = useState<string | null>(null);
   const [shopping, setShopping] = useState<WasherShoppingPick | null>(null);
@@ -126,6 +129,14 @@ export function Places({ vehicleId, care, onAskMuse, locationAllowed }: { vehicl
     finally { setFinding(false); }
   };
 
+  const openAr = async () => {
+    if (!locationAllowed) { setParkingError("Location is off. Turn it on in Settings to use parking."); return; }
+    setParkingError(null);
+    // iOS only shows the compass prompt from a tap, so ask before the AR view opens.
+    if (compassAllowed) await requestBrowserPermission("motion");
+    setArOpen(true);
+  };
+
   const saveNote = () => {
     if (!parking) return;
     const next = { ...parking, note: parkingNote.trim() };
@@ -154,7 +165,7 @@ export function Places({ vehicleId, care, onAskMuse, locationAllowed }: { vehicl
       {parking ? <>
         <div className="places-coordinates"><strong>{parking.note || "Parking spot"}</strong><span>{parking.lat.toFixed(5)}, {parking.lon.toFixed(5)} · ±{Math.round(parking.accuracy)} m</span></div>
         {distance && <p className="places-distance" role="status"><Icon name="navigation" size={18}/>{distance} from your car · approximate straight-line distance</p>}
-        <div className="places-actions"><button type="button" className="places-primary" onClick={() => void findParking()} disabled={finding}>{finding ? "Locating…" : "Find my car"}</button><button type="button" onClick={() => void saveParking()} disabled={finding}>Update spot</button></div>
+        <div className="places-actions">{cameraAllowed ? <button type="button" className="places-primary" onClick={() => void openAr()} disabled={finding}><Icon name="camera" size={18}/>Find my car in AR</button> : <button type="button" className="places-primary" onClick={() => void findParking()} disabled={finding}>{finding ? "Locating…" : "Find my car"}</button>}<button type="button" onClick={() => void saveParking()} disabled={finding}>Update spot</button></div>
         <label className="places-note-label">Parking note<input value={parkingNote} maxLength={80} onChange={(event) => setParkingNote(event.target.value)} onBlur={saveNote} placeholder="Level 3, space B12"/></label>
       </> : <>
         <p className="places-help">Your parking coordinates stay in this browser. Save a level or space number as a note.</p>
@@ -166,6 +177,7 @@ export function Places({ vehicleId, care, onAskMuse, locationAllowed }: { vehicl
 
     <SavedPlacesSection storageKey={`carmori:garages:${vehicleId}`} title="Repair shops" subtitle="Find a shop or keep one you trust" icon="status" mapsQuery="auto repair" noun="shop"/>
     <SavedPlacesSection storageKey={`carmori:car-washes:${vehicleId}`} title="Car washes" subtitle="Find a wash nearby or keep your usual one" icon="car" mapsQuery="car wash" noun="car wash"/>
+    {arOpen && parking && <FindCarAR spot={parking} compassAllowed={compassAllowed} onClose={() => setArOpen(false)}/>}
     <p className="places-privacy">Parking and saved places stay on this device. Map search opens only when you tap it.</p>
   </div>;
 }

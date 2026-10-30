@@ -766,3 +766,24 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .k-switch:disabled{opacity:.4;cursor:default}
 .k-switch:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.k-switch,.k-switch::after{transition:none}}
+/* Find my car AR: camera view with direction chevrons, a pin when the car is ahead, and a bottom card. */
+.ar-screen{position:fixed;z-index:60;inset:0;overflow:hidden;background:#111}
+.ar-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ar-camera-error{position:absolute;top:calc(128px + env(safe-area-inset-top));left:20px;right:20px;margin:0;color:#ffffffcc;font-size:14px;text-align:center}
+.ar-close{position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;width:44px;height:44px;display:grid;place-items:center;border:0;border-radius:50%;background:#0000006b;color:#fff}
+.ar-chevrons{position:absolute;left:50%;top:58%;width:132px;transform:translate(-50%,-50%) rotate(var(--ar-turn,0deg));transition:transform .25s ease-out;filter:drop-shadow(0 6px 10px #0b3a8a73)}
+.ar-chevrons svg{display:block;width:100%;fill:none;stroke:#2f80ff;stroke-width:13;stroke-linecap:round;stroke-linejoin:round;animation:ar-pulse 1.2s ease-in-out infinite}
+.ar-chevrons svg path:last-child{opacity:.6}
+.ar-chevrons.is-ahead{top:66%}
+@keyframes ar-pulse{0%,100%{transform:translateY(4px);opacity:.85}50%{transform:translateY(-4px);opacity:1}}
+.ar-pin{position:absolute;left:var(--ar-x,50%);top:34%;width:120px;transform:translate(-50%,-50%) scale(var(--ar-scale,1));transition:left .25s ease-out;filter:drop-shadow(0 14px 16px #0006)}
+.ar-pin svg{display:block;width:100%;animation:ar-bob 1.6s ease-in-out infinite}
+@keyframes ar-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.ar-hint{position:absolute;top:calc(72px + env(safe-area-inset-top));left:20px;right:20px;margin:0;padding:10px 14px;border-radius:12px;background:#000000a6;color:#fff;font-size:14px;text-align:center}
+.ar-panel{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:10px;padding:0 16px calc(16px + env(safe-area-inset-bottom))}
+.ar-card{display:flex;flex-direction:column;gap:4px;padding:18px 20px;border-radius:16px;background:#fff;color:var(--k-text-1);box-shadow:0 8px 24px #0003}
+.ar-card strong{font-size:19px;font-weight:700}
+.ar-card span{color:var(--k-text-2);font-size:15px}
+.ar-card small{color:var(--k-text-3);font-size:12px}
+.ar-end{height:56px;border:0;border-radius:14px;background:var(--k-brand);color:#fff;font-size:17px;font-weight:700}
+@media (prefers-reduced-motion:reduce){.ar-chevrons,.ar-pin{transition:none}.ar-chevrons svg,.ar-pin svg{animation:none}}

@@ -119,7 +119,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [carBriefing, setCarBriefing] = useState(readCarBriefingSetting);
   const [perms, setPerms] = useState(readPermissionSettings);
-  const [permStates, setPermStates] = useState<Record<AppPermission, BrowserPermission>>({ location: "unknown", microphone: "unknown", camera: "unknown" });
+  const [permStates, setPermStates] = useState<Record<AppPermission, BrowserPermission>>({ location: "unknown", microphone: "unknown", camera: "unknown", motion: "unknown" });
   const [autoMessage, setAutoMessage] = useState("Enable once before your drive");
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [trackingMessage, setTrackingMessage] = useState("Tracking is off");
@@ -317,7 +317,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   useEffect(() => {
     if (menuView !== "settings") return;
     let active = true;
-    void Promise.all((["location", "microphone", "camera"] as const).map(async (name) => [name, await browserPermission(name)] as const))
+    void Promise.all((["location", "microphone", "camera", "motion"] as const).map(async (name) => [name, await browserPermission(name)] as const))
       .then((entries) => { if (active) setPermStates(Object.fromEntries(entries) as Record<AppPermission, BrowserPermission>); });
     return () => { active = false; };
   }, [menuView]);
@@ -776,7 +776,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
 
       {!profileOpen && tab === "places" && <div className="k-home">
         <header className="k-hero"><h1 className="k-title">Muse for Car</h1><p className="k-lead">Your parked car, shops, and supplies</p></header>
-        <Places key={vehicleId} vehicleId={vehicleId} care={care} onAskMuse={askMuseToShop} locationAllowed={perms.location}/>
+        <Places key={vehicleId} vehicleId={vehicleId} care={care} onAskMuse={askMuseToShop} locationAllowed={perms.location} cameraAllowed={perms.camera} compassAllowed={perms.motion}/>
       </div>}
 
       {!profileOpen && tab === "assistant" && <>
@@ -846,6 +846,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
               <div className="settings-row"><span><strong>Location</strong><small>{permissionStatusText(perms.location, permStates.location)}</small></span><button type="button" role="switch" className="k-switch" aria-checked={permissionOn("location")} aria-label="Location access" disabled={false} onClick={() => void setPermission("location", !permissionOn("location"))}/></div>
               <div className="settings-row"><span><strong>Drive tracking</strong><small>{perms.location ? trackingMessage : "Needs location"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={trackingEnabled} aria-label="Drive tracking" disabled={!perms.location} onClick={toggleStatusTracking}/></div>
               <div className="settings-row"><span><strong>Play briefing when driving</strong><small>{perms.location ? (autoEnabled ? autoMessage : "Plays once driving movement is detected") : "Needs location"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={autoEnabled} aria-label="Play briefing when driving" disabled={!perms.location} onClick={toggleAutoBriefing}/></div>
+              <div className="settings-row"><span><strong>Compass</strong><small>{perms.motion ? "Points Find my car toward your car" : "Off · Find my car shows distance only"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={perms.motion} aria-label="Compass access" onClick={() => void setPermission("motion", !perms.motion)}/></div>
               <p className="settings-group">Voice</p>
               <div className="settings-row"><span><strong>Microphone</strong><small>{perms.microphone ? `${permissionStatusText(true, permStates.microphone)} · Ask by voice and hands-free guide` : permissionStatusText(false, permStates.microphone)}</small></span><button type="button" role="switch" className="k-switch" aria-checked={permissionOn("microphone")} aria-label="Microphone access" disabled={false} onClick={() => void setPermission("microphone", !permissionOn("microphone"))}/></div>
               {carConnectionAvailable && <>
