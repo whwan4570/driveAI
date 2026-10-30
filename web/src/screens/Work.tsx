@@ -41,9 +41,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const roiSelectedRef = useRef(false);
   const [roi, setRoi] = useState<Roi>(FULL_FRAME);
   const [roiSelected, setRoiSelected] = useState(false);
-  // Where the inlet is in the camera frame (0–1): the tapped point, or the box from a live capture.
+  // Where the inlet is in the camera frame (0–1): the tapped point, or the box found in a live capture.
   const [inletPoint, setInletPoint] = useState<{ x: number; y: number } | null>(null);
-  const [previewFromLive, setPreviewFromLive] = useState(false);
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [session, setSession] = useState<SessionView | null>(null);
@@ -53,14 +52,11 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [cameraAvailable, setCameraAvailable] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
   const [visionStatus, setVisionStatus] = useState<string>("unverified");
-  const [preview, setPreview] = useState<string | null>(null);
   const [inspection, setInspection] = useState<InspectionResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [productInspection, setProductInspection] = useState<InspectionResult | null>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const productInputRef = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
-  const [lastHint, setLastHint] = useState<string | null>(null);
   const [hands, setHands] = useState<HandPoint[][]>([]);
   const [handTracking, setHandTracking] = useState<"loading" | "ready" | "unavailable">("loading");
   const add = (who: Caption["who"], text: string) => setCaptions((c) => [...c, { who, text }]);
@@ -68,7 +64,6 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const say = async (text: string | null) => {
     if (!text) return;
     add("carmori", text);
-    setLastHint(text);
     await voice.speak(text);
   };
 
@@ -82,7 +77,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           if (cancelled) s.getTracks().forEach((t) => t.stop());
           else stream = s;
         })
-        .catch(() => { if (!cancelled) { setCameraAvailable(false); setError("Camera access is unavailable. Upload a photo to locate the washer inlet."); } });
+        .catch(() => { if (!cancelled) setCameraAvailable(false); });
     }
     const onVisibility = () => controllerRef.current?.setPaused(document.hidden);
     document.addEventListener("visibilitychange", onVisibility);
@@ -162,7 +157,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   };
 
   const analyzePhoto = async (base64: string, photoType: "engine" | "product") => {
-    if (photoType === "engine") { setPreview(`data:image/jpeg;base64,${base64}`); setInspection(null); }
+    if (photoType === "engine") setInspection(null);
     else setProductInspection(null);
     setAnalyzing(true);
     setError(null);
@@ -178,13 +173,11 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   const capture = () => {
     if (!videoRef.current?.videoWidth) { setError("Camera is not ready. Upload a photo instead."); return; }
-    setPreviewFromLive(true);
     void analyzePhoto(grabJpeg(videoRef.current, FULL_FRAME, 1600, 0.78), "engine");
   };
 
   const upload = async (file: File | undefined, photoType: "engine" | "product") => {
     if (!file) return;
-    if (photoType === "engine") setPreviewFromLive(false);
     try { await analyzePhoto(await photoFromFile(file), photoType); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the photo."); }
   };
@@ -257,7 +250,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     }
   }, (issue) => setVoiceError(issue === "empty" ? "I didn't catch that. Please try again." : "Voice transcription failed. Check your connection and try again."));
 
-  const located = previewFromLive && inspection?.status === "located" && inspection.box
+  const located = inspection?.status === "located" && inspection.box
     ? { x: (inspection.box[0] + inspection.box[2]) / 2, y: (inspection.box[1] + inspection.box[3]) / 2 } : null;
   const anchor = roiSelected && inletPoint ? inletPoint : located;
 
@@ -267,14 +260,14 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const statusLabel = done ? "Task complete" : session?.paused ? "Paused" : waiting === "NEED_VOICE_CONFIRM" ? "Waiting for your confirmation" : waiting ? "Waiting for a clear view" : session ? "Watching automatically" : "Camera ready";
   const instruction = waiting ? WAIT_MESSAGE[waiting] : current?.instruction ?? "Mount your phone with the washer fluid inlet in view";
 
-  return <div className="app-shell work-shell"><main className="screen work-screen">
-    <header className="work-header"><button type="button" className="icon-button" aria-label="Back to home" onClick={onDone}><Icon name="close" size={22}/></button><div><span className="section-overline">CARMORI VISION</span><strong>Washer fluid refill</strong></div><span className="live-indicator"><span/>{demoMode ? "DEMO" : "LIVE"}</span></header>
+  const visionBlocked = visionStatus === "billing_required" || visionStatus === "unauthorized";
+  const roiStyle = cover ? { left: roi.x * cover.width - cover.offsetX, top: roi.y * cover.height - cover.offsetY, width: roi.w * cover.width, height: roi.h * cover.height }
+    : { left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.w * 100}%`, height: `${roi.h * 100}%` };
 
-    <div className="work-progress"><div className="work-progress-top"><span>{current && current.number > 0 ? `${current.number} / 4` : "Ready"}</span><strong>{current?.title ?? "Camera setup"}</strong></div><div className="progress-track">{[1, 2, 3, 4].map((n) => <i key={n} className={current && (done || current.number >= n) ? "filled" : ""}/>)}</div></div>
-
-    <div className={`viewport${session ? " session-active" : ""}`} ref={viewportRef} onClick={pickRoi}>
+  // The whole guide happens on the camera view: progress on top, the inlet cue in the scene, one card at the bottom.
+  return <div className="app-shell work-shell"><main className="arw">
+    <div className={`arw-viewport${session ? " session-active" : ""}`} ref={viewportRef} onClick={pickRoi}>
       <video ref={videoRef} playsInline muted onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}/>
-      <div className="camera-vignette"/>
       {cover && hands.length > 0 && <svg className="hand-overlay" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
         {hands.flatMap((hand, handIndex) => [
           ...HAND_CHAINS.map((chain, chainIndex) => <path key={`h${handIndex}-c${chainIndex}`} d={chain.map((index, pointIndex) => {
@@ -284,43 +277,68 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           ...[4, 8, 12, 16, 20].map((index) => <circle key={`h${handIndex}-p${index}`} cx={hand[index].x * cover.width - cover.offsetX} cy={hand[index].y * cover.height - cover.offsetY} r="3.4"/>),
         ])}
       </svg>}
+      {roiSelected && !done && <div className="arw-roi" style={roiStyle}/>}
       {anchor && cameraAvailable && <InletCue
         left={cover ? anchor.x * cover.width - cover.offsetX : `${anchor.x * 100}%`}
         top={cover ? anchor.y * cover.height - cover.offsetY : `${anchor.y * 100}%`}
         step={session?.step ?? null} waiting={session?.waiting_reason} paused={!!session?.paused}/>}
-      <span className="camera-tag"><Icon name="camera" size={15}/>{session ? "Live view" : cameraAvailable ? "Rear camera" : "Camera unavailable"}</span>
-      {cameraAvailable && handTracking !== "loading" && <span className="hand-tracking-tag">{handTracking === "unavailable" ? "Hand cues unavailable" : hands.length ? "Hands in view" : "Watching for hands"}</span>}
-      {!session && <span className="camera-center-hint"><Icon name="inspect" size={31}/><strong>{roiSelected ? "Inlet area selected" : "Tap the inlet on screen"}</strong><small>Carmori will focus on this area</small></span>}
-      {roiSelected && <div className="roi" style={cover ? { left: roi.x * cover.width - cover.offsetX, top: roi.y * cover.height - cover.offsetY, width: roi.w * cover.width, height: roi.h * cover.height } : { left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.w * 100}%`, height: `${roi.h * 100}%` }}><span>Inlet area</span></div>}
-      {done && <div className="camera-complete"><span><Icon name="check" size={30}/></span><strong>Saved</strong></div>}
     </div>
 
-    {!session && <section className="inspection-controls">
-      <h2>Locate the washer inlet</h2><p>Photograph the engine bay or upload a photo. Carmori labels a cap only when the model can locate it clearly.</p>
-      <div className="inspection-actions"><button type="button" onClick={capture} disabled={!cameraAvailable || analyzing}>Capture photo</button><button type="button" onClick={() => imageInputRef.current?.click()} disabled={analyzing}>Upload photo</button></div>
-      <input ref={imageInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => void upload(e.target.files?.[0], "engine")}/>
-      {analyzing && <div className="inspection-message">Analyzing the photo…</div>}
-      {preview && <div className="inspection-preview"><img src={preview} alt="Captured engine compartment"/>{inspection?.status === "located" && inspection.box && <div className="inspection-box" style={{ left: `${inspection.box[0] * 100}%`, top: `${inspection.box[1] * 100}%`, width: `${(inspection.box[2] - inspection.box[0]) * 100}%`, height: `${(inspection.box[3] - inspection.box[1]) * 100}%` }}><span>Washer inlet candidate</span></div>}</div>}
-      {inspection && <div className={`inspection-message ${inspection.status}`}>{inspection.observation}{inspection.status === "located" && <small>AI observation · Confirm the washer symbol on the cap.</small>}</div>}
-      {preview && <button type="button" className="inspection-retake" onClick={() => { setPreview(null); setInspection(null); imageInputRef.current?.click(); }}>Retake or choose another photo</button>}
-      {demoMode && <p className="demo-disclosure">Demo mode simulates live step observations. It does not verify real camera actions.</p>}
-      {visionStatus === "billing_required" && <div className="inspection-message uncertain">Meta Vision needs billing enabled for this API key. Photo analysis and automatic step recognition are unavailable.</div>}
-    </section>}
+    <header className="arw-top">
+      <button type="button" className="arw-icon" aria-label="Close guide" onClick={onDone}><Icon name="close" size={22}/></button>
+      <div className="arw-progress" aria-label={current && current.number > 0 ? `Step ${current.number} of 4` : "Setup"}>
+        <strong>{current && current.number > 0 ? `${current.number}/4 · ${current.title}` : current?.title ?? "Washer fluid refill"}</strong>
+        <div className="arw-progress-track">{[1, 2, 3, 4].map((n) => <i key={n} className={current && (done || current.number >= n) ? "filled" : ""}/>)}</div>
+      </div>
+      <span className="arw-live"><span/>{demoMode ? "DEMO" : "LIVE"}</span>
+    </header>
+    {cameraAvailable && handTracking === "ready" && hands.length > 0 && <span className="arw-hands">Hands in view</span>}
 
-    <section className={`observation-card${waiting ? " is-waiting" : ""}${done ? " is-done" : ""}`}>
-      <div className="observation-top"><span className={`observation-dot${session && !session.paused && !done ? " pulsing" : ""}`}/><strong>{statusLabel}</strong>{session && !done && <span className="observation-auto">Hands-free progress</span>}</div>
-      <h1>{instruction}</h1>
-      <p>{done ? "This work is saved to your car history" : waiting ? "I will stay here until I can confirm it" : session ? "I will advance when the action is visible" : "Select the inlet area, then start the guide"}</p>
-    </section>
+    <div className="arw-bottom">
+      {captions.length > 0 && session && <div className="arw-captions"><Captions items={captions.slice(-2)}/></div>}
+      {error && <div className="arw-error" role="alert">{error}</div>}
+      {voiceError && <div className="arw-error" role="alert">{voiceError}</div>}
 
-    {lastHint && session && <div className="observed-event"><span><Icon name="eye" size={17}/></span><p>{lastHint}</p></div>}
-    {error && <div className="inline-error" role="alert">{error}</div>}
-    {voiceError && <div className="inline-error" role="alert">{voiceError}</div>}
-    {session?.step === "CONFIRM_PRODUCT" && <section className="inspection-controls"><h2>Check the product label</h2><p>Show the label to the live camera, or upload a close-up for a separate check.</p><button type="button" onClick={() => productInputRef.current?.click()} disabled={analyzing}>Scan label photo</button><input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => void upload(e.target.files?.[0], "product")}/>{productInspection && <div className={`inspection-message ${productInspection.product_status.toLowerCase()}`}>{productInspection.observation} · {productInspection.product_status}</div>}</section>}
-    {captions.length > 0 && <div className="work-captions"><Captions items={captions.slice(-2)}/></div>}
-
-    {!session ? visionStatus === "billing_required" || visionStatus === "unauthorized" ? <div className="guide-blocked"><p>To continue safely, use your vehicle manual to identify the cap and verify the product label. You can save a completed refill from History.</p><button type="button" className="primary action-button work-start" onClick={onDone}>Back to my car<Icon name="arrow" size={18}/></button></div> : <button type="button" className="primary action-button work-start" onClick={() => void start()} disabled={starting}>{starting ? "Starting…" : "Start guide"}<Icon name="arrow" size={18}/></button>
-      : done ? <button type="button" className="primary action-button work-start" onClick={onDone}>Back to my car<Icon name="arrow" size={18}/></button>
-      : <><div className="work-footer"><div className="work-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Ask a question or say ‘repeat that’" : "Voice questions are unavailable. Camera guidance continues."}</span></div><button type="button" className="pause-button" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE", "touch")} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button></div>{waiting === "NEED_VOICE_CONFIRM" && <div className="completion-confirm"><button type="button" className="primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, I completed the refill</button><button type="button" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button></div>}</>}
+      <section className={`arw-card${waiting ? " is-waiting" : ""}${done ? " is-done" : ""}`} aria-live="polite">
+        {!session ? !cameraAvailable ? <>
+          <h1>The guide needs the camera</h1>
+          <p>It watches the washer inlet live. Allow camera access, then open the guide again.</p>
+          <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
+        </> : visionBlocked ? <>
+          <h1>Camera guidance is unavailable</h1>
+          <p>Use your vehicle manual to find the cap and check the label. You can save a finished refill from History.</p>
+          <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
+        </> : <>
+          <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
+          <h1>{anchor ? "Keep the phone still and start" : "Tap the washer cap on screen"}</h1>
+          <p>{anchor ? "Tap again to move the marker." : "Mount your phone so the cap stays in view."}</p>
+          {analyzing && <p className="arw-note">Looking for the inlet…</p>}
+          {inspection && !analyzing && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
+          <div className="arw-actions">
+            <button type="button" className="arw-secondary" onClick={capture} disabled={analyzing}><Icon name="camera" size={18}/>Find it for me</button>
+            <button type="button" className="arw-primary" onClick={() => void start()} disabled={starting || !anchor}>{starting ? "Starting…" : "Start guide"}</button>
+          </div>
+          {demoMode && <p className="arw-note">Demo mode simulates step observations. It does not verify real camera actions.</p>}
+        </> : done ? <>
+          <span className="arw-status is-done"><Icon name="check" size={16}/>Saved to history</span>
+          <h1>Washer fluid refill recorded</h1>
+          <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
+        </> : <>
+          <div className="arw-card-top">
+            <span className="arw-status"><span className={`arw-dot${!session.paused ? " pulsing" : ""}`}/>{statusLabel}</span>
+            <button type="button" className="arw-pause" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE", "touch")} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button>
+          </div>
+          <h1>{instruction}</h1>
+          {waiting === "NEED_VOICE_CONFIRM" ? <div className="arw-actions">
+            <button type="button" className="arw-secondary" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button>
+            <button type="button" className="arw-primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, refilled</button>
+          </div> : session.step === "CONFIRM_PRODUCT" ? <>
+            <button type="button" className="arw-secondary is-wide" onClick={() => productInputRef.current?.click()} disabled={analyzing}><Icon name="camera" size={18}/>Scan label photo</button>
+            <input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => void upload(e.target.files?.[0], "product")}/>
+            {productInspection && <p className={`arw-note ${productInspection.product_status.toLowerCase()}`}>{productInspection.observation} · {productInspection.product_status}</p>}
+          </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Voice is off. The camera keeps guiding."}</span></div>}
+        </>}
+      </section>
+    </div>
   </main></div>;
 }
