@@ -11,7 +11,7 @@ import { useUtterances, useVoice } from "../voiceContext";
 import { Captions, type Caption } from "./Captions";
 
 const STEPS: Record<Step, { title: string; instruction: string; number: number }> = {
-  FIND_INLET: { title: "Find the inlet", instruction: "Show the blue cap with the windshield symbol", number: 0 },
+  FIND_INLET: { title: "Find the inlet", instruction: "Show the cap with the windshield washer symbol", number: 0 },
   OPEN_CAP: { title: "Open the cap", instruction: "Open the washer fluid cap", number: 1 },
   CONFIRM_PRODUCT: { title: "Check the product", instruction: "Show the bottle label to the camera", number: 2 },
   POUR: { title: "Refill washer fluid", instruction: "Tilt the bottle over the inlet and pour slowly", number: 3 },
