@@ -46,7 +46,7 @@ export function RecordForm({ vehicle, initialComponent, onSaved, onCancel }: {
     }
   };
 
-  return <form className="record-form" onSubmit={(event) => void save(event)}>
+  return <form className="record-form k-form k-sheet" onSubmit={(event) => void save(event)}>
     <div className="record-form-heading"><h2>Add a maintenance record</h2><button type="button" onClick={onCancel} aria-label="Close record form">×</button></div>
     <label>Component<select value={component} onChange={(event) => { const next = event.target.value as Component; setComponent(next); setEventType("inspection"); }}><option value="washer_fluid">Washer fluid</option>{SERVICE_COMPONENTS.map(({ id }) => <option key={id} value={id}>{MAINTENANCE_LABELS[id]}</option>)}</select></label>
     <label>Completed action<select value={eventType} onChange={(event) => setEventType(event.target.value as EventType)}><option value="inspection">Inspection</option>{component === "washer_fluid" ? <option value="refill">Fluid refill</option> : <>{component === "tires" && <option value="rotation">Rotation</option>}<option value="replacement">Replacement</option></>}</select></label>

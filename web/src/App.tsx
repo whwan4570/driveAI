@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
+import { readPermissionSettings } from "./lib/permissions";
 import { Home } from "./screens/Home";
 import { Setup } from "./screens/Setup";
 import { Work } from "./screens/Work";
@@ -54,8 +55,10 @@ export function App() {
   const start = async () => {
     if (started) return;
     voice.unlockTts();
-    await voice.startListening();
-    setVoiceReady(true);
+    // With the microphone off in Settings the guide still runs; it just takes taps instead of voice.
+    const micAllowed = readPermissionSettings().microphone;
+    if (micAllowed) await voice.startListening();
+    setVoiceReady(micAllowed);
     try {
       await navigator.wakeLock?.request("screen");
     } catch {

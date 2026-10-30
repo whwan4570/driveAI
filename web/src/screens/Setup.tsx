@@ -217,7 +217,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
     setError(null);
   };
 
-  return <div className="app-shell"><main className={`screen setup-screen${!manual && !scanResult ? " is-k" : ""}${!manual && !scanResult && mode !== null ? " has-k-cta" : ""}`}>
+  return <div className="app-shell"><main className={`screen setup-screen is-k${!manual && !scanResult && mode !== null ? " has-k-cta" : ""}`}>
     <header className="topbar"><div className="brand"><span className="brand-mark"><Icon name="car" size={27}/></span><span>Carmori</span></div></header>
     {!manual && !scanResult && mode === null && <div className="k-page">
       <header className="k-hero"><h1 className="k-title">Add your car</h1><p className="k-lead">Pick how you want to start.</p></header>
@@ -257,7 +257,7 @@ export function Setup({ onRegistered }: { onRegistered: (vehicleId: string) => v
       </div>
     </div>}
 
-    {(scanResult || manual) && <form className="setup-form vehicle-review" onSubmit={submit}>
+    {(scanResult || manual) && <form className="setup-form vehicle-review k-form k-sheet" onSubmit={submit}>
       {scanResult ? <><span className="result-kicker"><Icon name="check" size={16}/>{scanResult.source === "vin" ? "VIN decoded" : scanResult.source === "document" ? "Document read" : "Visual match"}</span><h2>Is this your car?</h2><p className="review-note">{scanResult.message}{scanResult.vin_last4 ? ` VIN ending in ${scanResult.vin_last4}.` : ""}{scanResult.source === "document" && documentName ? ` Source: ${documentName}.` : ""}{scanResult.sale_date ? " Confirm the suggested sale date is when you bought this car." : ""}</p></>
         : <><h2>Vehicle details</h2><p className="review-note">Add your car to personalize care suggestions.</p></>}
       <VehiclePicker make={make} model={model} year={typeof year === "number" ? year : null} onChange={(next) => { setMake(next.make); setModel(next.model); setBodyStyle(inferredCivicBodyStyle(next.model)); setTrim(""); }}/>

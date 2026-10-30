@@ -44,7 +44,7 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
     finally { setBusy(false); }
   };
 
-  return <form className="tire-inspection" onSubmit={(event) => void save(event)}>
+  return <form className="tire-inspection k-form k-sheet" onSubmit={(event) => void save(event)}>
     <div className="record-form-heading"><h2>Tire inspection</h2><button type="button" onClick={onCancel} aria-label="Close tire inspection">×</button></div>
     <p>Take a tire photo to check for visible issues. A photo cannot measure tread depth or pressure.</p>
     <input ref={inputRef} type="file" accept="image/*" capture="environment" hidden onChange={(event) => void analyze(event.target.files?.[0])}/>

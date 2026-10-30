@@ -59,9 +59,9 @@ export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
     }
   };
 
-  return <div className="vehicle-editor">
-    <div className="page-heading"><p className="eyebrow">MY VEHICLE</p><h1>Edit vehicle</h1><p>Keep your care suggestions grounded in current details.</p></div>
-    <form className="setup-form" onSubmit={(event) => void save(event)}>
+  return <div className="vehicle-editor k-home">
+    <header className="k-hero"><h1 className="k-title">Edit vehicle</h1><p className="k-lead">Keep care suggestions grounded in current details.</p></header>
+    <form className="setup-form k-form k-sheet" onSubmit={(event) => void save(event)}>
       <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); setBodyStyle(inferredCivicBodyStyle(next.model)); setTrim(""); }}/>
       <label>Model year<input type="number" min="1981" max="2035" value={year} onChange={(event) => setYear(event.target.value)} required/></label>
       <VehicleConfigurationFields make={make} model={model} bodyStyle={bodyStyle} onBodyStyleChange={setBodyStyle} trim={trim} onTrimChange={setTrim}/>

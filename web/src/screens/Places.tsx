@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Icon } from "../components/Icons";
+import { Icon, type IconName } from "../components/Icons";
 import { api, type CareResponse, type WasherShoppingPick } from "../lib/api";
 
 type ParkingSpot = { lat: number; lon: number; accuracy: number; savedAt: string; note: string };
@@ -38,18 +38,51 @@ function locationError(error: unknown): string {
   return "Could not get your location. Try again when your phone has a signal.";
 }
 
-export function Places({ vehicleId, care, onAskMuse }: { vehicleId: string; care: CareResponse | null; onAskMuse: () => void }) {
+function SavedPlacesSection({ storageKey, title, subtitle, icon, mapsQuery, noun }: {
+  storageKey: string;
+  title: string;
+  subtitle: string;
+  icon: IconName;
+  mapsQuery: string;
+  /** Singular, lower case: "shop", "car wash". */
+  noun: string;
+}) {
+  const [saved, setSaved] = useState<Garage[]>(() => readLocal(storageKey, []));
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [adding, setAdding] = useState(false);
+  const plural = noun.endsWith("sh") ? `${noun}es` : `${noun}s`;
+
+  const add = (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const next = [...saved, { id: crypto.randomUUID(), name: name.trim(), address: address.trim() }];
+    localStorage.setItem(storageKey, JSON.stringify(next)); setSaved(next);
+    setName(""); setAddress(""); setAdding(false);
+  };
+
+  const remove = (id: string) => {
+    const next = saved.filter((item) => item.id !== id);
+    localStorage.setItem(storageKey, JSON.stringify(next)); setSaved(next);
+  };
+
+  return <section className="places-card" aria-label={title}>
+    <div className="places-card-heading"><span className="places-icon"><Icon name={icon} size={23}/></span><div><h2>{title}</h2><p>{subtitle}</p></div></div>
+    <a className="places-primary places-full places-link" href={`https://maps.apple.com/?q=${encodeURIComponent(mapsQuery)}`} target="_blank" rel="noopener noreferrer">Find {plural} in Maps <Icon name="arrow" size={17}/></a>
+    <div className="places-saved-heading"><h3>Saved {plural}</h3><button type="button" onClick={() => setAdding((value) => !value)}>{adding ? "Cancel" : `+ Add ${noun}`}</button></div>
+    {adding && <form className="places-garage-form k-form" onSubmit={add}><input aria-label={`${noun} name`} placeholder={`${noun[0].toUpperCase()}${noun.slice(1)} name`} value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required/><input aria-label={`${noun} address`} placeholder="Address (optional)" value={address} onChange={(event) => setAddress(event.target.value)} maxLength={160}/><button className="places-primary" type="submit">Save {noun}</button></form>}
+    {saved.length === 0 && !adding && <p className="places-empty">No saved {plural} yet.</p>}
+    {saved.map((item) => <div className="places-garage" key={item.id}><div><strong>{item.name}</strong>{item.address && <span>{item.address}</span>}</div><button type="button" onClick={() => remove(item.id)} aria-label={`Remove ${item.name}`}>Remove</button></div>)}
+  </section>;
+}
+
+export function Places({ vehicleId, care, onAskMuse, locationAllowed }: { vehicleId: string; care: CareResponse | null; onAskMuse: () => void; locationAllowed: boolean }) {
   const parkingKey = `carmori:parking:${vehicleId}`;
-  const garagesKey = `carmori:garages:${vehicleId}`;
   const [parking, setParking] = useState<ParkingSpot | null>(() => readLocal(parkingKey, null));
-  const [garages, setGarages] = useState<Garage[]>(() => readLocal(garagesKey, []));
   const [parkingNote, setParkingNote] = useState(() => parking?.note ?? "");
   const [finding, setFinding] = useState(false);
   const [distance, setDistance] = useState<string | null>(null);
   const [parkingError, setParkingError] = useState<string | null>(null);
-  const [garageName, setGarageName] = useState("");
-  const [garageAddress, setGarageAddress] = useState("");
-  const [addingGarage, setAddingGarage] = useState(false);
   const [shopping, setShopping] = useState<WasherShoppingPick | null>(null);
   const [shoppingError, setShoppingError] = useState(false);
   const [shoppingLoading, setShoppingLoading] = useState(true);
@@ -68,6 +101,7 @@ export function Places({ vehicleId, care, onAskMuse }: { vehicleId: string; care
   const lowF = shopping?.forecast_low_c === null || shopping?.forecast_low_c === undefined ? null : Math.round(shopping.forecast_low_c * 9 / 5 + 32);
 
   const saveParking = async () => {
+    if (!locationAllowed) { setParkingError("Location is off. Turn it on in Settings to use parking."); return; }
     setFinding(true); setParkingError(null);
     try {
       const position = await locate();
@@ -80,6 +114,7 @@ export function Places({ vehicleId, care, onAskMuse }: { vehicleId: string; care
   };
 
   const findParking = async () => {
+    if (!locationAllowed) { setParkingError("Location is off. Turn it on in Settings to use parking."); return; }
     if (!parking) return;
     setFinding(true); setParkingError(null);
     try {
@@ -95,19 +130,6 @@ export function Places({ vehicleId, care, onAskMuse }: { vehicleId: string; care
     if (!parking) return;
     const next = { ...parking, note: parkingNote.trim() };
     localStorage.setItem(parkingKey, JSON.stringify(next)); setParking(next);
-  };
-
-  const addGarage = (event: FormEvent) => {
-    event.preventDefault();
-    if (!garageName.trim()) return;
-    const next = [...garages, { id: crypto.randomUUID(), name: garageName.trim(), address: garageAddress.trim() }];
-    localStorage.setItem(garagesKey, JSON.stringify(next)); setGarages(next);
-    setGarageName(""); setGarageAddress(""); setAddingGarage(false);
-  };
-
-  const removeGarage = (id: string) => {
-    const next = garages.filter((garage) => garage.id !== id);
-    localStorage.setItem(garagesKey, JSON.stringify(next)); setGarages(next);
   };
 
   return <div className="places-screen">
@@ -142,14 +164,8 @@ export function Places({ vehicleId, care, onAskMuse }: { vehicleId: string; care
       {parkingError && <p className="places-error" role="alert">{parkingError}</p>}
     </section>
 
-    <section className="places-card" aria-label="Repair shops">
-      <div className="places-card-heading"><span className="places-icon"><Icon name="status" size={23}/></span><div><h2>Repair shops</h2><p>Find a shop or keep one you trust</p></div></div>
-      <a className="places-primary places-full places-link" href="https://maps.apple.com/?q=auto+repair" target="_blank" rel="noopener noreferrer">Find repair shops in Maps <Icon name="arrow" size={17}/></a>
-      <div className="places-saved-heading"><h3>Saved shops</h3><button type="button" onClick={() => setAddingGarage((value) => !value)}>{addingGarage ? "Cancel" : "+ Add shop"}</button></div>
-      {addingGarage && <form className="places-garage-form" onSubmit={addGarage}><input aria-label="Shop name" placeholder="Shop name" value={garageName} onChange={(event) => setGarageName(event.target.value)} maxLength={80} required/><input aria-label="Shop address" placeholder="Address (optional)" value={garageAddress} onChange={(event) => setGarageAddress(event.target.value)} maxLength={160}/><button className="places-primary" type="submit">Save shop</button></form>}
-      {garages.length === 0 && !addingGarage && <p className="places-empty">No saved shops yet.</p>}
-      {garages.map((garage) => <div className="places-garage" key={garage.id}><div><strong>{garage.name}</strong>{garage.address && <span>{garage.address}</span>}</div><button type="button" onClick={() => removeGarage(garage.id)} aria-label={`Remove ${garage.name}`}>Remove</button></div>)}
-    </section>
-    <p className="places-privacy">Parking and saved shops stay on this device. Map search opens only when you tap it.</p>
+    <SavedPlacesSection storageKey={`carmori:garages:${vehicleId}`} title="Repair shops" subtitle="Find a shop or keep one you trust" icon="status" mapsQuery="auto repair" noun="shop"/>
+    <SavedPlacesSection storageKey={`carmori:car-washes:${vehicleId}`} title="Car washes" subtitle="Find a wash nearby or keep your usual one" icon="car" mapsQuery="car wash" noun="car wash"/>
+    <p className="places-privacy">Parking and saved places stay on this device. Map search opens only when you tap it.</p>
   </div>;
 }

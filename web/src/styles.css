@@ -690,3 +690,79 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .k-status .service-status-trigger>svg{color:#b0b8c1}
 .k-status .service-status-track{height:6px;margin:-4px var(--k-pad) 12px calc(var(--k-pad) + 58px);background:var(--k-bg)}
 .k-status .service-status-footnote{margin:8px 0 6px}
+/* k-style for the remaining pages: every card becomes a full-width white block on the gray page. */
+.k-home .relationship-card,.k-home .places-card,.k-home .shop-hero,.k-home .document-card,.k-home .history-summary>section{margin:0;padding:var(--k-pad);border:0;border-radius:0;background:var(--k-surface);box-shadow:none;color:var(--k-text-1)}
+.k-home .history-summary,.k-home .places-screen{display:flex;flex-direction:column;gap:12px}
+.k-home .relationship-card h2,.k-home .places-card h2,.k-home .shop-hero h1{font-size:20px;font-weight:700;letter-spacing:-.01em}
+.k-home .places-card-heading p,.k-home .relationship-card p,.k-home .shop-hero p{font-size:14px;line-height:1.5;color:var(--k-text-2)}
+.k-home .places-icon{width:44px;height:44px;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-1)}
+.k-home .places-privacy{margin:0;padding:0 var(--k-page-x);color:var(--k-text-3);font-size:13px}
+.k-home .places-primary,.k-home .shop-actions a{min-height:48px;border-radius:var(--k-r-s);background:var(--k-brand);color:#fff;font-size:15px;font-weight:700}
+.k-home .places-actions button:not(.places-primary),.k-home .shop-actions button,.k-home .places-saved-heading button{border-radius:var(--k-r-s);background:var(--k-brand-tint);color:var(--k-brand-text);font-weight:700}
+.k-block-count{color:var(--k-text-3);font-size:14px}
+.k-row.is-add .k-row-art{background:var(--k-brand-tint);color:var(--k-brand)}
+.k-row.is-add strong{color:var(--k-brand-text)}
+.history-block .history-view-switch{margin:4px var(--k-pad) 8px;padding:4px;border-radius:var(--k-r-m);background:var(--k-bg)}
+.history-block .history-view-switch button{min-height:36px;border-radius:var(--k-r-s);color:var(--k-text-3);font-size:14px;font-weight:600}
+.history-block .history-view-switch button.selected{background:var(--k-surface);color:var(--k-brand-text);box-shadow:0 1px 3px #0000001a}
+.history-block .history-record{border:0}
+.history-block .history-item{min-height:var(--k-row-h);padding:14px var(--k-pad);border:0;border-radius:0;background:none}
+.history-block .history-item strong{font-size:16px;font-weight:600}
+.history-block .history-item p,.history-block .history-item span{font-size:13px;color:var(--k-text-3)}
+.history-block .history-item-dot{width:44px;height:44px;border-radius:var(--k-r-m);background:var(--k-success-tint);color:var(--k-success)}
+.history-block .history-detail{margin:0 var(--k-pad) 12px;padding:12px;border-radius:var(--k-r-m);background:var(--k-bg);font-size:14px}
+.history-block .empty-state{margin:8px var(--k-pad);padding:24px 16px;border:0;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-2)}
+.history-block .history-calendar,.history-block .calendar{margin:0 var(--k-pad)}
+
+/* Forms: one white sheet, 14px labels, 52px fields, 56px buttons. */
+.k-sheet{margin:0 -20px;padding:var(--k-pad);border:0;border-radius:0;background:var(--k-surface);box-shadow:none}
+.k-home .k-sheet{margin:0}
+.k-form{display:flex;flex-direction:column;gap:16px;color:var(--k-text-1)}
+.k-form h2,.k-form .record-form-heading h2{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.k-form .review-note,.k-form .form-help,.k-form>p{margin:0;color:var(--k-text-3);font-size:13px;line-height:1.5}
+.k-form label{display:flex;flex-direction:column;gap:8px;color:var(--k-text-2);font-size:14px;font-weight:600}
+.k-form .optional{color:var(--k-text-3);font-size:12px;font-weight:500}
+.k-form input:not([type=checkbox]):not([type=radio]):not([type=file]),.k-form select,.k-form textarea{width:100%;min-height:52px;padding:12px 14px;border:1px solid transparent;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-1);font-size:16px;font-weight:500}
+.k-form textarea{min-height:96px}
+.k-form input:focus,.k-form select:focus,.k-form textarea:focus{outline:0;border-color:var(--k-brand);background:var(--k-surface)}
+.k-form .review-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.k-form .relationship-confirm,.k-form .record-confirm{display:flex;flex-direction:row;align-items:flex-start;gap:10px;padding:14px;border:0;border-radius:var(--k-r-m);background:var(--k-bg);color:var(--k-text-2);font-size:14px;font-weight:500;line-height:1.5}
+.k-form input[type=checkbox]{width:20px;height:20px;min-height:20px;margin:1px 0 0;flex:none;accent-color:var(--k-brand)}
+.k-form .action-button,.k-form .service-status-save,.k-form .service-status-secondary{width:100%;height:56px;border-radius:var(--k-r-m);font-size:17px;font-weight:700}
+.k-form .primary.action-button,.k-form .service-status-save{border:0;background:var(--k-brand);color:#fff}
+.k-form .secondary.action-button,.k-form .service-status-secondary{border:0;background:var(--k-surface);color:var(--k-text-1);box-shadow:inset 0 0 0 1px #d1d6db}
+.k-form .text-button{padding:4px 0 0;color:var(--k-text-3);font-size:14px;font-weight:600}
+.k-form .picker-field,.k-form .picker-trigger{min-height:52px;border-radius:var(--k-r-m)}
+.setup-screen.is-k .inline-error,.is-k-home .inline-error{border-radius:var(--k-r-m)}
+
+/* Detail dialogs become bottom sheets. */
+.service-status-overlay{z-index:40;align-items:flex-end;padding:0}
+.service-status-dialog{width:min(100%,430px);border:0;border-radius:20px 20px 0 0;padding:24px var(--k-pad) calc(20px + env(safe-area-inset-bottom));box-shadow:none}
+.service-status-dialog h2{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.service-status-description{color:var(--k-text-2);font-size:15px;line-height:1.55}
+.service-status-dialog .service-status-save,.service-status-dialog .service-status-secondary{height:56px;border-radius:var(--k-r-m);font-size:17px;font-weight:700}
+.service-status-dialog .service-status-save{background:var(--k-brand)}
+.k-home .shop-actions button,.k-home .places-actions button:not(.places-primary),.k-home .places-saved-heading button{border:0}
+.k-home .places-help,.k-home .places-empty,.k-home .shop-disclosure,.k-home .shop-reason{color:var(--k-text-3);font-size:13px;line-height:1.5}
+.k-home .places-note-label{gap:8px;color:var(--k-text-2);font-size:14px;font-weight:600}
+.k-home .places-note-label input,.k-home .places-garage-form input{min-height:52px;padding:12px 14px;border:1px solid transparent;border-radius:var(--k-r-m);background:var(--k-bg);font-size:16px}
+.k-home .places-note-label input:focus,.k-home .places-garage-form input:focus{outline:0;border-color:var(--k-brand);background:var(--k-surface)}
+.k-home .places-saved-heading h3{font-size:16px;font-weight:700}
+.k-form label{display:block}
+.k-form label>input:not([type=checkbox]),.k-form label>select,.k-form label>textarea{display:block;margin-top:8px}
+.k-form label .optional{margin-left:4px}
+/* Settings: one switch per row, grouped by the sensor it needs. */
+.settings-list{display:flex;flex-direction:column}
+.settings-group{margin:20px 0 4px;color:var(--k-text-3);font-size:13px;font-weight:600}
+.settings-group:first-child{margin-top:4px}
+.settings-row{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 0;border-bottom:1px solid #f2f4f6}
+.settings-row>span{display:flex;flex-direction:column;flex:1;min-width:0}
+.settings-row strong{color:var(--k-text-1);font-size:16px;font-weight:600;line-height:1.4}
+.settings-row small{margin-top:2px;color:var(--k-text-3);font-size:13px;line-height:1.4}
+.k-switch{position:relative;flex:none;width:52px;height:32px;padding:0;border:0;border-radius:16px;background:#d1d6db;cursor:pointer;transition:background .15s}
+.k-switch::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:left .15s}
+.k-switch[aria-checked="true"]{background:var(--k-brand)}
+.k-switch[aria-checked="true"]::after{left:23px}
+.k-switch:disabled{opacity:.4;cursor:default}
+.k-switch:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.k-switch,.k-switch::after{transition:none}}

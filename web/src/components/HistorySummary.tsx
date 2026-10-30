@@ -100,7 +100,7 @@ export function HistorySummary({ vehicle, issues, issuesLoading, issuesAvailable
           {!issuesLoading && !issuesAvailable && <button type="button" onClick={() => void onRefresh()} disabled={busy}>Retry</button>}
           <button type="button" onClick={() => setFormOpen((open) => !open)} disabled={!vehicle || busy}>{formOpen ? "Cancel" : "Log major issue"}</button>
         </div>
-        {formOpen && <form className="issue-form" onSubmit={(event) => void addIssue(event)}>
+        {formOpen && <form className="issue-form k-form" onSubmit={(event) => void addIssue(event)}>
           <label>Type<select value={kind} onChange={(event) => setKind(event.target.value as MajorIssueKind)}>{Object.entries(ISSUE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Date<input type="date" min={vehicle?.purchased_on ?? undefined} max={todayLocalISO()} value={occurredOn} onChange={(event) => setOccurredOn(event.target.value)} required/></label>
           <label>Notes <span className="optional">optional</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} placeholder="What happened?"/></label>
