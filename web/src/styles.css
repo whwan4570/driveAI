@@ -787,3 +787,23 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .ar-card small{color:var(--k-text-3);font-size:12px}
 .ar-end{height:56px;border:0;border-radius:14px;background:var(--k-brand);color:#fff;font-size:17px;font-weight:700}
 @media (prefers-reduced-motion:reduce){.ar-chevrons,.ar-pin{transition:none}.ar-chevrons svg,.ar-pin svg{animation:none}}
+/* Washer guide AR cue pinned at the inlet. */
+.inlet-cue{position:absolute;z-index:3;width:0;height:0;pointer-events:none}
+.inlet-cue>svg{position:absolute;left:50%;filter:drop-shadow(0 8px 10px #0008)}
+.inlet-cue-pin{width:54px;bottom:6px;transform:translateX(-50%);animation:inlet-bob 1.6s ease-in-out infinite}
+.inlet-cue-turn{width:112px;top:50%;transform:translate(-50%,-50%);fill:none;stroke:#2f80ff;stroke-width:9;stroke-linecap:round;stroke-linejoin:round;animation:inlet-spin 2.4s ease-in-out infinite}
+.inlet-cue.is-open .inlet-cue-turn{animation-name:inlet-spin-back}
+.inlet-cue-pour{width:60px;bottom:22px;transform:translateX(-50%);fill:none;stroke:#2f80ff;stroke-width:11;stroke-linecap:round;stroke-linejoin:round}
+.inlet-cue-pour path{animation:inlet-chevron 1.2s ease-in-out infinite}
+.inlet-cue-pour path:nth-child(2){animation-delay:.15s}.inlet-cue-pour path:nth-child(3){animation-delay:.3s}
+.inlet-cue-ring{position:absolute;left:0;top:0;width:96px;height:96px;border:5px solid #ffb020;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 6px #ffb02040;animation:inlet-pulse 1.4s ease-in-out infinite}
+.inlet-cue-label{position:absolute;left:0;top:30px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000000b3;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+.inlet-cue.is-open .inlet-cue-label,.inlet-cue.is-close .inlet-cue-label{top:66px}
+.inlet-cue.is-blocked .inlet-cue-label{top:60px;background:#b94100}
+.inlet-cue.is-paused>svg,.inlet-cue.is-paused .inlet-cue-ring{animation-play-state:paused;opacity:.6}
+@keyframes inlet-bob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-8px)}}
+@keyframes inlet-spin{0%{transform:translate(-50%,-50%) rotate(-20deg)}60%,100%{transform:translate(-50%,-50%) rotate(25deg)}}
+@keyframes inlet-spin-back{0%{transform:translate(-50%,-50%) rotate(20deg)}60%,100%{transform:translate(-50%,-50%) rotate(-25deg)}}
+@keyframes inlet-chevron{0%,100%{opacity:.35;transform:translateY(-4px)}50%{opacity:1;transform:translateY(4px)}}
+@keyframes inlet-pulse{0%,100%{transform:translate(-50%,-50%) scale(.92)}50%{transform:translate(-50%,-50%) scale(1.05)}}
+@media (prefers-reduced-motion:reduce){.inlet-cue *{animation:none!important}}

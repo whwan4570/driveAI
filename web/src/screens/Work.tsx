@@ -1,6 +1,7 @@
 // 고정 거치 카메라로 손·캡·병을 관찰한다. 세션 시작 후 단계는 서버 판정으로만 진행한다.
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon, Waveform } from "../components/Icons";
+import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionView, type Step, type VoiceIntent, type WaitReason } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
@@ -40,6 +41,9 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const roiSelectedRef = useRef(false);
   const [roi, setRoi] = useState<Roi>(FULL_FRAME);
   const [roiSelected, setRoiSelected] = useState(false);
+  // Where the inlet is in the camera frame (0–1): the tapped point, or the box from a live capture.
+  const [inletPoint, setInletPoint] = useState<{ x: number; y: number } | null>(null);
+  const [previewFromLive, setPreviewFromLive] = useState(false);
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [session, setSession] = useState<SessionView | null>(null);
@@ -150,6 +154,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     const x = cover ? (e.clientX - rect.left + cover.offsetX) / cover.width : (e.clientX - rect.left) / rect.width;
     const y = cover ? (e.clientY - rect.top + cover.offsetY) / cover.height : (e.clientY - rect.top) / rect.height;
     const next = roiAround(x, y);
+    setInletPoint({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
     roiRef.current = next;
     roiSelectedRef.current = true;
     setRoi(next);
@@ -173,11 +178,13 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   const capture = () => {
     if (!videoRef.current?.videoWidth) { setError("Camera is not ready. Upload a photo instead."); return; }
+    setPreviewFromLive(true);
     void analyzePhoto(grabJpeg(videoRef.current, FULL_FRAME, 1600, 0.78), "engine");
   };
 
   const upload = async (file: File | undefined, photoType: "engine" | "product") => {
     if (!file) return;
+    if (photoType === "engine") setPreviewFromLive(false);
     try { await analyzePhoto(await photoFromFile(file), photoType); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the photo."); }
   };
@@ -250,6 +257,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     }
   }, (issue) => setVoiceError(issue === "empty" ? "I didn't catch that. Please try again." : "Voice transcription failed. Check your connection and try again."));
 
+  const located = previewFromLive && inspection?.status === "located" && inspection.box
+    ? { x: (inspection.box[0] + inspection.box[2]) / 2, y: (inspection.box[1] + inspection.box[3]) / 2 } : null;
+  const anchor = roiSelected && inletPoint ? inletPoint : located;
+
   const current = session ? STEPS[session.step] : null;
   const done = session?.step === "RECORDED";
   const waiting = session?.waiting_reason;
@@ -273,6 +284,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           ...[4, 8, 12, 16, 20].map((index) => <circle key={`h${handIndex}-p${index}`} cx={hand[index].x * cover.width - cover.offsetX} cy={hand[index].y * cover.height - cover.offsetY} r="3.4"/>),
         ])}
       </svg>}
+      {anchor && cameraAvailable && <InletCue
+        left={cover ? anchor.x * cover.width - cover.offsetX : `${anchor.x * 100}%`}
+        top={cover ? anchor.y * cover.height - cover.offsetY : `${anchor.y * 100}%`}
+        step={session?.step ?? null} waiting={session?.waiting_reason} paused={!!session?.paused}/>}
       <span className="camera-tag"><Icon name="camera" size={15}/>{session ? "Live view" : cameraAvailable ? "Rear camera" : "Camera unavailable"}</span>
       {cameraAvailable && handTracking !== "loading" && <span className="hand-tracking-tag">{handTracking === "unavailable" ? "Hand cues unavailable" : hands.length ? "Hands in view" : "Watching for hands"}</span>}
       {!session && <span className="camera-center-hint"><Icon name="inspect" size={31}/><strong>{roiSelected ? "Inlet area selected" : "Tap the inlet on screen"}</strong><small>Carmori will focus on this area</small></span>}
