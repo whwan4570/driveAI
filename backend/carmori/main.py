@@ -44,7 +44,6 @@ from .models import (
     MajorIssue,
     MajorIssueKind,
     Observation,
-    ProductClass,
     SceneAnswer,
     SessionState,
     Step,
@@ -265,15 +264,6 @@ class InspectionIn(BaseModel):
     component: Literal["washer_fluid", "tires"]
     photo_type: Literal["engine", "product", "tire"]
     jpeg_base64: str = Field(min_length=100, max_length=5_600_000)
-
-
-class ProductScanIn(BaseModel):
-    jpeg_base64: str = Field(min_length=100, max_length=5_600_000)
-
-
-class ProductScanOut(BaseModel):
-    update: SessionUpdate
-    inspection: InspectionResult
 
 
 def create_app(
@@ -699,35 +689,29 @@ def create_app(
             )
         )
 
-    def decode_jpeg(data: str) -> bytes:
+    @app.post("/vehicles/{vehicle_id}/inspections/analyze", response_model=InspectionResult)
+    async def analyze_inspection(vehicle_id: str, body: InspectionIn) -> InspectionResult:
+        vehicle_or_404(vehicle_id)
+        if (body.component == "washer_fluid" and body.photo_type == "tire") or (body.component == "tires" and body.photo_type != "tire"):
+            raise HTTPException(422, "photo type does not match component")
         try:
-            jpeg = base64.b64decode(data, validate=True)
+            jpeg = base64.b64decode(body.jpeg_base64, validate=True)
         except (ValueError, base64.binascii.Error):
             raise HTTPException(422, "invalid image") from None
         if len(jpeg) > 4_000_000 or not (jpeg.startswith(b"\xff\xd8") and jpeg.endswith(b"\xff\xd9")):
             raise HTTPException(422, "expected a JPEG under 4 MB")
-        return jpeg
-
-    async def run_inspection(jpeg: bytes, component: str, photo_type: str) -> InspectionResult:
         try:
-            result = await asyncio.wait_for(inspector.analyze(jpeg, component, photo_type), settings.spark_timeout_s)
+            result = await asyncio.wait_for(inspector.analyze(jpeg, body.component, body.photo_type), settings.spark_timeout_s)
             if result.source == "meta_vision":
                 model_access["status"] = "ready"
             return result
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             model_access["status"] = "billing_required" if status == 402 else "unauthorized" if status in (401, 403) else "provider_error"
-            message = "Meta image analysis is blocked because billing is not configured for this API key." if status == 402 else "Meta rejected this API key or model permission." if status in (401, 403) else "Meta image analysis is temporarily unavailable. Retry or consult your vehicle manual."
-            return InspectionResult(status="unavailable", component=component, observation=message)
+            message = "Meta image analysis is blocked because billing is not configured for this API key." if status == 402 else "Meta rejected this API key or model permission." if status in (401, 403) else "Image analysis is temporarily unavailable. Retry or consult your vehicle manual."
+            return InspectionResult(status="unavailable", component=body.component, observation=message)
         except Exception:  # noqa: BLE001 - provider failures are explicit to the client
-            return InspectionResult(status="unavailable", component=component, observation="Image analysis is temporarily unavailable. Retry or consult your vehicle manual.")
-
-    @app.post("/vehicles/{vehicle_id}/inspections/analyze", response_model=InspectionResult)
-    async def analyze_inspection(vehicle_id: str, body: InspectionIn) -> InspectionResult:
-        vehicle_or_404(vehicle_id)
-        if (body.component == "washer_fluid" and body.photo_type == "tire") or (body.component == "tires" and body.photo_type != "tire"):
-            raise HTTPException(422, "photo type does not match component")
-        return await run_inspection(decode_jpeg(body.jpeg_base64), body.component, body.photo_type)
+            return InspectionResult(status="unavailable", component=body.component, observation="Image analysis is temporarily unavailable. Retry or consult your vehicle manual.")
 
     @app.post("/sessions")
     def create_session(body: SessionIn) -> SessionUpdate:
@@ -764,69 +748,6 @@ def create_app(
         if session_or_404(session_id).state_version != snapshot.state_version:
             raise HTTPException(409, "session changed; discard these tracks")
         return result
-
-    @app.post("/sessions/{session_id}/product-scan", response_model=ProductScanOut)
-    async def product_scan(session_id: str, body: ProductScanIn) -> ProductScanOut:
-        """Runs a label photo through the same state machine as live frames, so it can advance the step."""
-        received_at = utcnow()
-        jpeg = decode_jpeg(body.jpeg_base64)
-        snapshot = session_or_404(session_id)
-        _, spec = vehicle_or_404(snapshot.vehicle_id)
-        if snapshot.step is not Step.CONFIRM_PRODUCT:
-            raise HTTPException(409, "the session is not checking a product")
-        # Two model reads keep the two-agreement rule within one tap. Live frames arriving between
-        # two separate photos would otherwise reset the count.
-        started = time.perf_counter()
-        reads = await asyncio.gather(*(run_inspection(jpeg, "washer_fluid", "product") for _ in range(2)))
-        duration_ms = (time.perf_counter() - started) * 1000
-        inspection = next((read for read in reads if read.product_status != "MATCH"), reads[0])
-
-        async with locks[session_id]:
-            state = session_or_404(session_id)
-            view = SessionView.of(state)
-            if state.state_version != snapshot.state_version:
-                return ProductScanOut(update=SessionUpdate(session=view, transition_reason="superseded", spoken_hint=None), inspection=inspection)
-            if any(read.status == "unavailable" for read in reads):
-                return ProductScanOut(update=SessionUpdate(session=view, transition_reason="scan_unavailable", spoken_hint=None), inspection=inspection)
-
-            live_sequence = state.last_sequence_id
-            scan_id = uuid.uuid4().hex[:8]
-            reason = "no_change"
-            hint: str | None = None
-            event: TransitionEvidence | None = None
-            for index, read in enumerate(reads, start=1):
-                answer = SceneAnswer(
-                    label_text=read.product_label,
-                    product_class=ProductClass.WASHER_FLUID if read.product_status == "MATCH"
-                    else ProductClass.OTHER if read.product_status == "CONFLICT" else ProductClass.UNREADABLE,
-                )
-                obs = Observation(
-                    session_id=session_id, sequence_id=live_sequence + index, step=snapshot.step, attempt=snapshot.attempt,
-                    captured_at=received_at, received_at=received_at, frame_ids=[f"scan-{scan_id}-{index}"],
-                    answer=answer, model_version=spark.model_version,
-                )
-                pending = state.pending
-                result = transition(state, obs, now=utcnow(), spec=spec)
-                state = result.state
-                reason = result.reason
-                hint = result.spoken_hint or hint
-                if state.step is not Step.CONFIRM_PRODUCT:
-                    if result.reason == "product_matched" and pending:
-                        event = TransitionEvidence(
-                            from_step=Step.CONFIRM_PRODUCT, to_step=state.step, condition=result.reason,
-                            sequence_ids=[*pending.sequence_ids, obs.sequence_id], frame_ids=[*pending.frame_ids, *obs.frame_ids],
-                            model_version=spark.model_version, decided_at=utcnow(), model_duration_ms=round(duration_ms, 1),
-                            simulated=settings.spark_mode == "fake" or spark.model_version == "fake-happy-path",
-                        )
-                    reference_frames[session_id] = jpeg
-                    break
-            # Scan ids live outside the camera's counter; the next live window must still be accepted.
-            state = state.model_copy(update={"last_sequence_id": live_sequence})
-            store.save_session(state)
-            return ProductScanOut(
-                update=SessionUpdate(session=SessionView.of(state), transition_reason=reason, spoken_hint=hint, transition_event=event),
-                inspection=inspection,
-            )
 
     @app.post("/sessions/{session_id}/observations")
     async def post_observations(session_id: str, body: ObservationsIn) -> SessionUpdate:

@@ -11,6 +11,9 @@ const SAMPLE_INTERVAL_MS = 125;
 const FRAMES_PER_WINDOW = 2;
 const FRAME_GAP_MS = 400;
 const WINDOW_GAP_MS = 600;
+const SCAN_FRAME_GAP_MS = 500;
+const SCAN_MAX_SIDE = 1920;
+const SCAN_WAIT_MS = 15000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -21,7 +24,7 @@ export interface WorkSessionDeps {
   getMaxSide: () => number;
   sessionId: string;
   stateVersion: number;
-  onUpdate: (update: SessionUpdate, trigger: TriggerReason) => void;
+  onUpdate: (update: SessionUpdate, trigger: TriggerReason | "label_scan") => void;
   onError: (error: unknown) => void;
 }
 
@@ -111,6 +114,43 @@ export class WorkSessionController {
       });
     }
     return { sequence_id, frames };
+  }
+
+  private scanWindow(): WindowIn {
+    const sequence_id = ++this.seq;
+    return {
+      sequence_id,
+      frames: [{
+        frame_id: `${this.deps.sessionId.slice(0, 8)}-${sequence_id}-scan`,
+        captured_at: new Date().toISOString(),
+        jpeg_base64: grabJpeg(this.deps.video, this.deps.getRoi(), SCAN_MAX_SIDE, 0.85),
+      }],
+    };
+  }
+
+  /**
+   * Reads the label on request from two separate moments, sent together so a live read cannot
+   * fall between them and reset the agreement count. Waits for any running read to finish first.
+   */
+  async scanLabel() {
+    const deadline = performance.now() + SCAN_WAIT_MS;
+    while (this.inFlight) {
+      if (performance.now() > deadline) throw new Error("A camera check is still running.");
+      await sleep(100);
+    }
+    if (this.paused) return;
+    this.inFlight = true;
+    const epoch = this.epoch;
+    try {
+      const first = this.scanWindow();
+      await sleep(SCAN_FRAME_GAP_MS);
+      const second = this.scanWindow();
+      const update = await api.observe(this.deps.sessionId, [first, second], this.stateVersion);
+      if (epoch === this.epoch) this.deps.onUpdate(update, "label_scan");
+    } finally {
+      this.inFlight = false;
+      this.gate.reset(performance.now());
+    }
   }
 
   private async onTrigger(reason: TriggerReason) {

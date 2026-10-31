@@ -5,7 +5,6 @@ import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
-import { photoFromFile } from "../lib/photos";
 import { WorkSessionController } from "../lib/workSession";
 import { useUtterances, useVoice } from "../voiceContext";
 import { Captions, type Caption } from "./Captions";
@@ -65,9 +64,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [searchingInlet, setSearchingInlet] = useState(false);
   const [searchFinished, setSearchFinished] = useState(false);
   const [searchPass, setSearchPass] = useState(0);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [productInspection, setProductInspection] = useState<InspectionResult | null>(null);
-  const productInputRef = useRef<HTMLInputElement>(null);
+  const [scanningLabel, setScanningLabel] = useState(false);
   const [starting, setStarting] = useState(false);
   const [hands, setHands] = useState<HandPoint[][]>([]);
   const [handTracking, setHandTracking] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -279,23 +276,15 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     if (u.session.step === "RECORDED") controllerRef.current?.stop();
   };
 
-  // The label photo goes through the session, so a verified label moves the guide to the pour step.
-  const scanLabel = async (file: File | undefined) => {
-    if (!file || !session) return;
-    setProductInspection(null);
-    setAnalyzing(true);
+  const scanLabel = async () => {
+    setScanningLabel(true);
     setError(null);
     try {
-      const jpeg = await photoFromFile(file);
-      controllerRef.current?.invalidateInFlight();
-      const { update, inspection } = await api.productScan(session.session_id, jpeg);
-      setProductInspection(inspection);
-      if (inspection.status === "unavailable") setError(inspection.observation);
-      applyUpdate(update);
+      await controllerRef.current?.scanLabel();
     } catch {
-      setError("The label photo could not be checked. Try again.");
+      setError("The label could not be checked. Try again.");
     } finally {
-      setAnalyzing(false);
+      setScanningLabel(false);
     }
   };
 
@@ -433,11 +422,11 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
           <h1>{anchor ? "Keep the phone still and start" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
           <p>{anchor ? "Check the washer symbol on the marked cap." : "I'll look for the cap, or tap it on screen."}</p>
-          {(analyzing || searchingInlet) && <p className="arw-note" role="status">Looking for the washer fluid cap… {searchPass > 0 ? `${searchPass} of ${INLET_SEARCH_ROIS.length}` : ""}</p>}
-          {inspection && !analyzing && !searchingInlet && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
+          {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {searchPass > 0 ? `${searchPass} of ${INLET_SEARCH_ROIS.length}` : ""}</p>}
+          {inspection && !searchingInlet && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
           {searchFinished && !anchor && <p className="arw-note">Move closer or try another angle.</p>}
           <div className="arw-actions">
-            <button type="button" className="arw-secondary" onClick={() => { setError(null); setInspection(null); setSearchAttempt((n) => n + 1); }} disabled={analyzing || searchingInlet}><Icon name="camera" size={18}/>Look again</button>
+            <button type="button" className="arw-secondary" onClick={() => { setError(null); setInspection(null); setSearchAttempt((n) => n + 1); }} disabled={searchingInlet}><Icon name="camera" size={18}/>Look again</button>
             <button type="button" className="arw-primary" onClick={() => void start()} disabled={starting || !anchor}>{starting ? "Starting…" : "Start guide"}</button>
           </div>
           {demoMode && <p className="arw-note">Demo mode simulates step observations. It does not verify real camera actions.</p>}
@@ -455,9 +444,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
             <button type="button" className="arw-secondary" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button>
             <button type="button" className="arw-primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, refilled</button>
           </div> : session.step === "CONFIRM_PRODUCT" ? <>
-            <button type="button" className="arw-secondary is-wide" onClick={() => productInputRef.current?.click()} disabled={analyzing}><Icon name="camera" size={18}/>{analyzing ? "Checking the label…" : "Scan label photo"}</button>
-            <input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void scanLabel(e.target.files?.[0]); e.target.value = ""; }}/>
-            {productInspection && <p className={`arw-note ${productInspection.product_status.toLowerCase()}`}>{productInspection.observation}</p>}
+            <button type="button" className="arw-secondary is-wide" onClick={() => void scanLabel()} disabled={scanningLabel || session.paused}><Icon name="camera" size={18}/>{scanningLabel ? "Hold it steady…" : "Scan label now"}</button>
           </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Voice is off. The camera keeps guiding."}</span></div>}
         </>}
       </section>
