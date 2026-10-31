@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon, Waveform } from "../components/Icons";
 import { InletCue } from "../components/InletCue";
-import { api, type InspectionResult, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
+import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
 import { FULL_FRAME, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
 import { photoFromFile } from "../lib/photos";
@@ -248,25 +248,55 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     setSearchingInlet(false);
   };
 
-  const analyzePhoto = async (base64: string, photoType: "engine" | "product") => {
-    if (photoType === "engine") setInspection(null);
-    else setProductInspection(null);
+  const applyUpdate = (u: SessionUpdate) => {
+    setSession(u.session);
+    setBottleChanged(u.transition_reason === "bottle_changed");
+    if (u.transition_event) {
+      const message: Partial<Record<Step, string>> = {
+        OPEN_CAP: "Inlet found",
+        CONFIRM_PRODUCT: "Cap opened",
+        POUR: "Bottle verified",
+        FINISH: "Pour observed",
+      };
+      setEvidence(u.transition_event);
+      setEvidenceOpen(false);
+      setTransitionMessage(message[u.session.step] ?? (u.session.step === "RECORDED" ? "Refill recorded" : null));
+      if (transitionTimerRef.current !== null) window.clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = window.setTimeout(() => setTransitionMessage(null), 2000);
+    }
+    previousStepRef.current = u.session.step;
+    controllerRef.current?.setStateVersion(u.session.state_version);
+    setObservationStatus(u.transition_reason === "awaiting_agreement" ? "Checking the observation" : null);
+    if (["model_billing_required", "model_unauthorized", "model_error"].includes(u.transition_reason)) {
+      controllerRef.current?.setPaused(true);
+      failurePausedRef.current = true;
+      setFailurePaused(true);
+    }
+    if (u.transition_reason === "model_billing_required") setError("Meta vision is blocked: this API key needs billing enabled. The camera cannot verify steps yet.");
+    else if (u.transition_reason === "model_unauthorized") setError("Meta vision rejected this API key or model permission.");
+    else if (u.transition_reason === "model_error") setError("Image analysis could not run. Try again or save completed work in History.");
+    void say(u.spoken_hint);
+    if (u.session.step === "RECORDED") controllerRef.current?.stop();
+  };
+
+  // The label photo goes through the session, so a verified label moves the guide to the pour step.
+  const scanLabel = async (file: File | undefined) => {
+    if (!file || !session) return;
+    setProductInspection(null);
     setAnalyzing(true);
     setError(null);
     try {
-      const result = await api.analyzeInspection(vehicleId, { component: "washer_fluid", photo_type: photoType, jpeg_base64: base64 });
-      if (photoType === "engine") setInspection(result);
-      else setProductInspection(result);
-      if (result.status === "unavailable") setError(result.observation);
-      else if (result.status === "uncertain") void say(result.observation);
-    } catch { setError("Image analysis failed. Retry the photo or use your vehicle manual."); }
-    finally { setAnalyzing(false); }
-  };
-
-  const upload = async (file: File | undefined, photoType: "engine" | "product") => {
-    if (!file) return;
-    try { await analyzePhoto(await photoFromFile(file), photoType); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the photo."); }
+      const jpeg = await photoFromFile(file);
+      controllerRef.current?.invalidateInFlight();
+      const { update, inspection } = await api.productScan(session.session_id, jpeg);
+      setProductInspection(inspection);
+      if (inspection.status === "unavailable") setError(inspection.observation);
+      applyUpdate(update);
+    } catch {
+      setError("The label photo could not be checked. Try again.");
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const start = async () => {
@@ -287,36 +317,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         getMaxSide: () => stepRef.current === "CONFIRM_PRODUCT" ? 1280 : 768,
         sessionId: update.session.session_id,
         stateVersion: update.session.state_version,
-        onUpdate: (u) => {
-          setSession(u.session);
-          setBottleChanged(u.transition_reason === "bottle_changed");
-          if (u.transition_event) {
-            const message: Partial<Record<Step, string>> = {
-              OPEN_CAP: "Inlet found",
-              CONFIRM_PRODUCT: "Cap opened",
-              POUR: "Bottle verified",
-              FINISH: "Pour observed",
-            };
-            setEvidence(u.transition_event);
-            setEvidenceOpen(false);
-            setTransitionMessage(message[u.session.step] ?? (u.session.step === "RECORDED" ? "Refill recorded" : null));
-            if (transitionTimerRef.current !== null) window.clearTimeout(transitionTimerRef.current);
-            transitionTimerRef.current = window.setTimeout(() => setTransitionMessage(null), 2000);
-          }
-          previousStepRef.current = u.session.step;
-          controllerRef.current?.setStateVersion(u.session.state_version);
-          setObservationStatus(u.transition_reason === "awaiting_agreement" ? "Checking the observation" : null);
-          if (["model_billing_required", "model_unauthorized", "model_error"].includes(u.transition_reason)) {
-            controller.setPaused(true);
-            failurePausedRef.current = true;
-            setFailurePaused(true);
-          }
-          if (u.transition_reason === "model_billing_required") setError("Meta vision is blocked: this API key needs billing enabled. The camera cannot verify steps yet.");
-          else if (u.transition_reason === "model_unauthorized") setError("Meta vision rejected this API key or model permission.");
-          else if (u.transition_reason === "model_error") setError("Image analysis could not run. Try again or save completed work in History.");
-          void say(u.spoken_hint);
-          if (u.session.step === "RECORDED") controller.stop();
-        },
+        onUpdate: applyUpdate,
         onError: () => { controller.setPaused(true); failurePausedRef.current = true; setFailurePaused(true); setError("Connection lost. Guide paused at this step."); },
       });
       controllerRef.current = controller;
@@ -454,8 +455,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
             <button type="button" className="arw-secondary" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button>
             <button type="button" className="arw-primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, refilled</button>
           </div> : session.step === "CONFIRM_PRODUCT" ? <>
-            <button type="button" className="arw-secondary is-wide" onClick={() => productInputRef.current?.click()} disabled={analyzing}><Icon name="camera" size={18}/>Scan label photo</button>
-            <input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => void upload(e.target.files?.[0], "product")}/>
+            <button type="button" className="arw-secondary is-wide" onClick={() => productInputRef.current?.click()} disabled={analyzing}><Icon name="camera" size={18}/>{analyzing ? "Checking the label…" : "Scan label photo"}</button>
+            <input ref={productInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void scanLabel(e.target.files?.[0]); e.target.value = ""; }}/>
             {productInspection && <p className={`arw-note ${productInspection.product_status.toLowerCase()}`}>{productInspection.observation}</p>}
           </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Voice is off. The camera keeps guiding."}</span></div>}
         </>}

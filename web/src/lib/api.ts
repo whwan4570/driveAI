@@ -337,6 +337,8 @@ export const api = {
       method: "POST", headers: { "Content-Type": "video/mp4" }, body: mp4,
     }),
   // via=touch: 화면 버튼으로 보낸 확인은 manual_entry로 기록된다.
+  productScan: (sessionId: string, jpegBase64: string) =>
+    post<{ update: SessionUpdate; inspection: InspectionResult }>(`/sessions/${sessionId}/product-scan`, { jpeg_base64: jpegBase64 }),
   voice: (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") =>
     post<SessionUpdate>(`/sessions/${sessionId}/voice`, { intent, via }),
   transcribe: async (wav: Blob): Promise<string> => {

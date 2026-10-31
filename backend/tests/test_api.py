@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from carmori.config import Settings
+from carmori.inspection import InspectionResult
 from carmori.main import create_app
 from carmori.models import SceneAnswer, Step, Tri
 from carmori.spark import HappyPathSpark
@@ -291,3 +292,79 @@ def test_purchase_document_scan_can_prefill_vehicle_without_creating_refill_hist
     }).status_code == 422
     vehicle = client.post("/vehicles", json={"spec_id": "demo", "year": 2022, "make": "Toyota", "model": "Corolla"}).json()
     assert client.get(f"/vehicles/{vehicle['vehicle_id']}/memory").json() == []
+
+
+class ScanInspector:
+    def __init__(self, *reads: tuple[str, str | None]) -> None:
+        self.reads = list(reads)
+
+    async def analyze(self, jpeg: bytes, component: str, photo_type: str) -> InspectionResult:
+        assert (component, photo_type) == ("washer_fluid", "product")
+        status, label = self.reads.pop(0)
+        if status == "UNAVAILABLE":
+            return InspectionResult(status="unavailable", component=component, observation="Unavailable")
+        return InspectionResult(
+            status="located" if status == "MATCH" else "uncertain", component=component, observation=status,
+            confidence="high", product_status=status, product_label=label, source="meta_vision",
+        )
+
+
+SCAN_JPEG = base64.b64encode(b"\xff\xd8" + b"x" * 120 + b"\xff\xd9").decode()
+
+
+def session_at_product_step(inspector: ScanInspector) -> tuple[TestClient, str]:
+    client = TestClient(create_app(Settings(), spark=HappyPathSpark(), inspector=inspector))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    seq = 1
+    while True:
+        update = client.post(f"/sessions/{sid}/observations", json=windows(seq)).json()
+        seq += 2
+        if update["session"]["step"] == "CONFIRM_PRODUCT":
+            return client, sid
+
+
+def test_label_scan_advances_when_both_reads_match():
+    client, sid = session_at_product_step(ScanInspector(("MATCH", "Windshield Washer Fluid"), ("MATCH", "Rain-X Windshield Washer")))
+    body = client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).json()
+    assert body["update"]["session"]["step"] == "POUR"
+    assert body["update"]["transition_reason"] == "product_matched"
+    assert body["update"]["transition_event"]["condition"] == "product_matched"
+
+
+def test_label_scan_with_one_failed_read_does_not_advance():
+    client, sid = session_at_product_step(ScanInspector(("MATCH", "Windshield Washer Fluid"), ("UNKNOWN", None)))
+    body = client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).json()
+    assert body["update"]["session"]["step"] == "CONFIRM_PRODUCT"
+    assert body["update"]["session"]["waiting_reason"] == "PRODUCT_UNKNOWN"
+    assert body["inspection"]["product_status"] == "UNKNOWN"
+
+
+def test_label_scan_of_other_product_says_conflict():
+    client, sid = session_at_product_step(ScanInspector(("CONFLICT", None), ("CONFLICT", None)))
+    body = client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).json()
+    assert body["update"]["session"]["waiting_reason"] == "PRODUCT_CONFLICT"
+    assert "washer fluid" in body["update"]["spoken_hint"]
+
+
+def test_label_scan_unavailable_leaves_state_alone_and_live_frames_continue():
+    client, sid = session_at_product_step(ScanInspector(("UNAVAILABLE", None), ("MATCH", "Washer Fluid")))
+    body = client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).json()
+    assert body["update"]["transition_reason"] == "scan_unavailable"
+    assert body["update"]["session"]["step"] == "CONFIRM_PRODUCT"
+
+
+def test_label_scan_outside_product_step_is_refused():
+    client = TestClient(create_app(Settings(), spark=HappyPathSpark(), inspector=ScanInspector()))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    assert client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).status_code == 409
+
+
+def test_live_frames_still_count_after_a_label_scan():
+    client, sid = session_at_product_step(ScanInspector(("UNKNOWN", None), ("UNKNOWN", None)))
+    before = client.post(f"/sessions/{sid}/product-scan", json={"jpeg_base64": SCAN_JPEG}).json()
+    assert before["update"]["session"]["step"] == "CONFIRM_PRODUCT"
+    update = client.post(f"/sessions/{sid}/observations", json=windows(100)).json()
+    assert update["session"]["step"] == "POUR"
+
