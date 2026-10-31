@@ -18,6 +18,9 @@ SOURCE_LABEL: dict[CompletionSource, str] = {
     CompletionSource.MANUAL_ENTRY: "added manually",
 }
 
+def source_label(record: MaintenanceRecord) -> str:
+    return "simulated observation" if record.model_version == "fake-happy-path" else SOURCE_LABEL[record.completion_source]
+
 
 class Fact(BaseModel):
     id: str
@@ -60,7 +63,7 @@ def build_facts(
         facts.append(
             Fact(
                 id="last_refill",
-                text=f"The last washer fluid refill was logged {when}, {SOURCE_LABEL[last.completion_source]}.",
+                text=f"The last washer fluid refill was logged {when}, {source_label(last)}.",
                 source="records",
                 as_of=last.completed_at,
             )
@@ -130,7 +133,8 @@ def render_memory_answer(records: Sequence[MaintenanceRecord], now: datetime) ->
         "engine_air_filter": "engine air filter",
     }.get(last.component, last.component.replace("_", " "))
     text = (
-        f"A {component} {last.event_type} was logged on {when}, {SOURCE_LABEL[last.completion_source]}. "
+        f"A {component} {last.event_type} was logged on {when}, {source_label(last)}. "
+        + (f"The confirmed product was {last.product_label}. " if last.product_label else "")
         + (f"Your note says: {last.notes}. " if last.notes else "")
         + ("The amount poured and remaining fluid level were not verified." if last.component == "washer_fluid" and last.event_type == "refill" else "")
     )

@@ -17,6 +17,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export interface WorkSessionDeps {
   video: HTMLVideoElement;
   getRoi: () => Roi;
+  /** Longest side of observation frames; the label step needs more pixels than the inlet steps. */
+  getMaxSide: () => number;
   sessionId: string;
   stateVersion: number;
   onUpdate: (update: SessionUpdate, trigger: TriggerReason) => void;
@@ -105,7 +107,7 @@ export class WorkSessionController {
       frames.push({
         frame_id: `${this.deps.sessionId.slice(0, 8)}-${sequence_id}-${i}`,
         captured_at: new Date().toISOString(),
-        jpeg_base64: grabJpeg(this.deps.video, this.deps.getRoi()),
+        jpeg_base64: grabJpeg(this.deps.video, this.deps.getRoi(), this.deps.getMaxSide(), 0.8),
       });
     }
     return { sequence_id, frames };

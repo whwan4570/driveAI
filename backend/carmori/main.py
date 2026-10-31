@@ -10,6 +10,7 @@ import logging
 import base64
 import json
 import tempfile
+import time
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -36,6 +37,7 @@ from .inspection import InspectionResult, Inspector, MetaInspector, UnavailableI
 from .manual_cache import ManualCache
 from .manual_catalog import match_owner_manual
 from .manual_guidance import find_manual_guidance
+from .nearby_places import nearby_vehicle_places
 from .models import (
     CompletionSource,
     MaintenanceRecord,
@@ -128,12 +130,25 @@ class WindowResult(BaseModel):
     answer: SceneAnswer | None
 
 
+class TransitionEvidence(BaseModel):
+    from_step: Step
+    to_step: Step
+    condition: str
+    sequence_ids: list[int]
+    frame_ids: list[str]
+    model_version: str
+    decided_at: datetime
+    model_duration_ms: float
+    simulated: bool
+
+
 class SessionUpdate(BaseModel):
     session: SessionView
     transition_reason: str
     spoken_hint: str | None
     record: MaintenanceRecord | None = None
     windows: list[WindowResult] = Field(default_factory=list)
+    transition_event: TransitionEvidence | None = None
 
 
 class VehicleIn(BaseModel):
@@ -339,6 +354,13 @@ def create_app(
     @app.get("/health")
     def health() -> dict:
         return {"ok": True, "spark": spark.model_version, "demo_mode": settings.spark_mode == "fake", "vision_status": model_access["status"]}
+
+    @app.get("/places/nearby")
+    async def nearby_places(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180)) -> dict:
+        try:
+            return {"places": await nearby_vehicle_places(lat, lon)}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return {"places": []}
 
     @app.get("/vehicle-specs")
     def vehicle_specs() -> list[dict]:
@@ -757,7 +779,9 @@ def create_app(
             except Exception:  # noqa: BLE001 - 모델 실패는 대기로 처리한다
                 return None
 
+        started = time.perf_counter()
         answers = await asyncio.gather(*(analyze(frames) for frames in decoded))
+        duration_ms = (time.perf_counter() - started) * 1000
 
         async with locks[session_id]:
             state = session_or_404(session_id)
@@ -772,6 +796,13 @@ def create_app(
             last_reason = "no_change"
             hint: str | None = None
             record: MaintenanceRecord | None = None
+            event: TransitionEvidence | None = None
+            if any(answer is None for answer in answers):
+                state = state.model_copy(update={"pending": None})
+                store.save_session(state)
+                reason = "model_billing_required" if model_access["status"] == "billing_required" else "model_unauthorized" if model_access["status"] == "unauthorized" else "model_error"
+                return SessionUpdate(session=SessionView.of(state), transition_reason=reason, spoken_hint=None,
+                                     windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason=reason, answer=None) for w in windows])
             for window, frames, answer in zip(windows, decoded, answers):
                 if answer is None:
                     reason = "model_billing_required" if model_access["status"] == "billing_required" else "model_unauthorized" if model_access["status"] == "unauthorized" else "model_error"
@@ -790,8 +821,15 @@ def create_app(
                     model_version=spark.model_version,
                 )
                 before = state.step
+                pending = state.pending
                 result = transition(state, obs, now=utcnow(), spec=spec)
                 state = result.state
+                if (state.step != before and pending and len(pending.sequence_ids) > 0
+                    and result.reason in {"inlet_found", "cap_opened", "product_matched", "pour_observed", "recorded:observed_sequence"}):
+                    event = TransitionEvidence(from_step=before, to_step=state.step, condition=result.reason,
+                        sequence_ids=[*pending.sequence_ids, obs.sequence_id], frame_ids=[*pending.frame_ids, *obs.frame_ids],
+                        model_version=spark.model_version, decided_at=utcnow(), model_duration_ms=round(duration_ms, 1),
+                        simulated=settings.spark_mode == "fake" or spark.model_version == "fake-happy-path")
                 record = save_result(result) or record
                 if state.step is not before:
                     reference_frames[session_id] = frames[-1]
@@ -807,6 +845,7 @@ def create_app(
                 spoken_hint=hint,
                 record=record,
                 windows=results,
+                transition_event=event,
             )
 
     @app.post("/sessions/{session_id}/voice")
@@ -860,7 +899,7 @@ def create_app(
         if session is not None and any(phrase in question for phrase in ("what step", "where are we", "what should i do", "what do i do next")):
             key = session.last_hint_key or STEP_ENTRY_HINT.get(session.step)
             return AskOut(text=hint_text(key) if key else "The task is complete.", fact_ids=["current_step"])
-        if session is not None and any(phrase in question for phrase in ("this bottle", "this product", "is this one right", "is it the right")):
+        if session is not None and any(phrase in question for phrase in ("this bottle", "this product", "is this one right", "is it the right", "is this the right one")):
             if session.confirmed_product:
                 return AskOut(text=f"The product label {session.confirmed_product} was confirmed for this session. If you changed bottles, show the new label before pouring.", fact_ids=["confirmed_product"])
             return AskOut(text="I have not confirmed this bottle yet. Show its label to the camera before pouring.", fact_ids=["product_unconfirmed"])

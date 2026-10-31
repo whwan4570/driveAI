@@ -19,10 +19,11 @@ FIELD_GUIDE: dict[str, str] = {
     "occluded": "true|false: something blocks the inlet so its state can't be judged",
     "inlet_visible": "yes|no|unclear: washer inlet cap in view",
     "inlet_symbol_ok": "yes|no|unclear: cap shows the windshield-washer symbol",
+    "inlet_shape_ok": "yes|no|unclear: blue cap clearly attached to a narrow white/translucent washer filler neck; color alone is unclear",
     "cap_state": "closed|open|occluded|not_visible",
     "hand_near_cap": "yes|no|unclear: hand touching or next to the cap",
     "label_text": "exact readable label text, or null",
-    "product_class": "washer_fluid|coolant|oil|other|unreadable: from the label only",
+    "product_class": "washer_fluid|coolant|oil|other|unreadable: from the label or item, not color; other if clearly not washer fluid; unreadable if you cannot tell",
     "bottle_over_inlet": "yes|no|unclear: bottle mouth above the open inlet",
     "bottle_tilted": "yes|no|unclear: bottle tilted to pour",
     "flow_visible": "yes|no|unclear: liquid visibly flowing into the inlet",
@@ -30,7 +31,7 @@ FIELD_GUIDE: dict[str, str] = {
 }
 
 STEP_FIELDS: dict[Step, tuple[str, ...]] = {
-    Step.FIND_INLET: ("occluded", "inlet_visible", "inlet_symbol_ok", "cap_state"),
+    Step.FIND_INLET: ("occluded", "inlet_visible", "inlet_symbol_ok", "inlet_shape_ok", "cap_state"),
     Step.OPEN_CAP: ("occluded", "cap_state", "hand_near_cap"),
     Step.CONFIRM_PRODUCT: ("occluded", "label_text", "product_class"),
     Step.POUR: (
@@ -63,9 +64,12 @@ def fields_for(step: Step | None) -> tuple[str, ...]:
 def build_scene_prompt(step: Step | None, *, has_reference: bool) -> str:
     fields = fields_for(step)
     reference = " Image 1 is the last confirmed step; compare cap_state with it." if has_reference else ""
+    guidance = ("Check image edges. A washer cap may be blue on a narrow white filler neck; color alone is not enough. "
+                "Exclude oil, coolant, radiator and brake caps." if step is Step.FIND_INLET else
+                "Report only what is visible; use unclear when unsure.")
     return "\n".join([
         f"Fixed camera at a car engine bay during a washer fluid refill. Frames are in time order.{reference}",
-        "Report only what is visible; use unclear when unsure.",
+        guidance,
         "Reply with only one JSON object, no other text, with these keys:",
         *(f"{name}: {FIELD_GUIDE[name]}" for name in fields),
     ])

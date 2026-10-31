@@ -17,10 +17,10 @@ export function roiAround(cx: number, cy: number, size = 0.5): Roi {
   return { x, y, w: size, h: size };
 }
 
-export async function openRearCamera(video: HTMLVideoElement): Promise<MediaStream> {
+export async function openRearCamera(video: HTMLVideoElement, size: { width: number; height: number } = { width: 1280, height: 720 }): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
-    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    video: { facingMode: { ideal: "environment" }, width: { ideal: size.width }, height: { ideal: size.height } },
   });
   video.srcObject = stream;
   video.muted = true;

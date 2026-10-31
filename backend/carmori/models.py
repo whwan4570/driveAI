@@ -74,6 +74,7 @@ class SceneAnswer(BaseModel):
     occluded: bool = False
     inlet_visible: Tri = Tri.UNCLEAR
     inlet_symbol_ok: Tri = Tri.UNCLEAR
+    inlet_shape_ok: Tri = Tri.UNCLEAR
     cap_state: CapState = CapState.NOT_VISIBLE
     # 기록용. 손이 가까이 있다는 사실은 어떤 전환의 근거도 되지 않는다.
     hand_near_cap: Tri = Tri.UNCLEAR
@@ -108,6 +109,7 @@ class Pending(BaseModel):
     key: str
     frame_ids: list[str]
     count: int
+    sequence_ids: list[int] = Field(default_factory=list)
 
 
 class SessionState(BaseModel):

@@ -1,4 +1,4 @@
-import type { MaintenanceRecord } from "./api";
+import type { CareRecommendation, MaintenanceRecord } from "./api";
 
 export type ServiceComponent = "engine_oil" | "engine_oil_filter" | "tires" | "brake_pads" | "brake_fluid" | "transmission_fluid" | "cabin_filter" | "engine_air_filter" | "spark_plugs" | "engine_coolant" | "drive_belt";
 
@@ -22,6 +22,15 @@ export const MAINTENANCE_LABELS: Record<string, string> = {
 };
 
 export type ServiceInterval = { months: number | null; miles: number | null };
+export type ServiceTone = "unknown" | "good" | "soon" | "due";
+
+// Keep the Service list and the vehicle markers on the same status rule.
+export function serviceTone(percent: number | null, priority?: CareRecommendation["priority"]): ServiceTone {
+  if (priority === "WARNING" || (percent !== null && percent <= 15)) return "due";
+  if (priority === "CHECK_SOON" || (percent !== null && percent <= 35)) return "soon";
+  if (priority === "ROUTINE" || percent !== null) return "good";
+  return "unknown";
+}
 type ServiceIntervals = Partial<Record<ServiceComponent, ServiceInterval>>;
 
 function storageKey(vehicleId: string): string { return `carmori:service-intervals:${vehicleId}`; }

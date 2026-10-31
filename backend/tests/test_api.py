@@ -65,12 +65,49 @@ def test_happy_path_records_once_and_updates_memory():
     assert len(memory) == 1
 
     after = client.post("/briefings", json={"vehicle_id": vid}).json()
-    assert "logged today, observed by camera" in after["text"]
+    assert "logged today, simulated observation" in after["text"]
 
     answer = client.post("/assistant/ask", json={"vehicle_id": vid, "question": "What did I do earlier?"}).json()
     assert "A washer fluid refill was logged" in answer["text"]
-    assert "observed by camera" in answer["text"]
+    assert "simulated observation" in answer["text"]
     assert answer["fact_ids"] == [memory[0]["record_id"]]
+
+
+def test_transition_event_requires_two_independent_observations():
+    client = make_client()
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    first, second = windows(1)["windows"]
+    one = client.post(f"/sessions/{sid}/observations", json={"windows": [first]}).json()
+    assert one["transition_event"] is None
+    two = client.post(f"/sessions/{sid}/observations", json={"windows": [second]}).json()
+    event = two["transition_event"]
+    assert event["from_step"] == "FIND_INLET" and event["to_step"] == "OPEN_CAP"
+    assert event["sequence_ids"] == [1, 2]
+    assert event["frame_ids"] == ["w1-0", "w1-1", "w2-0", "w2-1"]
+    assert event["simulated"] is True
+    assert event["model_duration_ms"] >= 0
+
+
+def test_model_failure_clears_pending_and_does_not_advance():
+    class FailOnce(HappyPathSpark):
+        fail = False
+        async def analyze(self, frames, step, reference=None):
+            if self.fail:
+                raise RuntimeError("unavailable")
+            return await super().analyze(frames, step, reference)
+
+    spark = FailOnce()
+    client = TestClient(create_app(Settings(), spark=spark))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    client.post(f"/sessions/{sid}/observations", json={"windows": [windows(1)["windows"][0]]})
+    spark.fail = True
+    failed = client.post(f"/sessions/{sid}/observations", json={"windows": [windows(2)["windows"][0]]}).json()
+    assert failed["transition_reason"] == "model_error" and failed["transition_event"] is None
+    spark.fail = False
+    retry = client.post(f"/sessions/{sid}/observations", json={"windows": [windows(3)["windows"][0]]}).json()
+    assert retry["session"]["step"] == "FIND_INLET" and retry["transition_event"] is None
 
 
 class UnseenPourSpark(HappyPathSpark):

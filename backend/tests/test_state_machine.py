@@ -78,6 +78,24 @@ def test_single_window_does_not_advance():
     assert r.spoken_hint is None
 
 
+def test_clear_washer_filler_neck_can_confirm_inlet_without_readable_symbol():
+    d = Driver()
+    visible_neck = SceneAnswer(inlet_visible=Tri.YES, inlet_symbol_ok=Tri.UNCLEAR,
+                               inlet_shape_ok=Tri.YES, cap_state=CapState.CLOSED)
+    assert d.obs(visible_neck).reason == "awaiting_agreement"
+    assert d.state.step is Step.FIND_INLET
+    assert d.obs(visible_neck).reason == "inlet_found"
+    assert d.state.step is Step.OPEN_CAP
+
+
+def test_visible_different_symbol_overrides_cap_shape_guess():
+    d = Driver()
+    wrong_cap = SceneAnswer(inlet_visible=Tri.YES, inlet_symbol_ok=Tri.NO,
+                            inlet_shape_ok=Tri.YES, cap_state=CapState.CLOSED)
+    assert d.obs(wrong_cap).reason == "waiting:WRONG_PART"
+    assert d.state.step is Step.FIND_INLET
+
+
 def test_two_disjoint_windows_advance_and_speak_next_hint():
     d = Driver()
     d.obs(INLET)
@@ -171,6 +189,7 @@ def test_same_hint_is_not_repeated_but_repeat_intent_forces_it():
         ("Brake Fluid DOT4", ProductClass.OTHER, WaitReason.PRODUCT_CONFLICT),
         (None, ProductClass.UNREADABLE, WaitReason.PRODUCT_UNKNOWN),
         ("사계절 워셔액", ProductClass.OTHER, WaitReason.PRODUCT_UNKNOWN),
+        (None, ProductClass.OTHER, WaitReason.PRODUCT_CONFLICT),
     ],
 )
 def test_product_not_matched_waits(label, cls, wait):
@@ -180,6 +199,27 @@ def test_product_not_matched_waits(label, cls, wait):
     d.obs(SceneAnswer(label_text=label, product_class=cls))
     assert d.state.step is Step.CONFIRM_PRODUCT
     assert d.state.waiting_reason is wait
+
+
+def test_washer_labels_read_differently_still_agree():
+    d = at_open_cap()
+    d.obs(OPEN)
+    d.obs(OPEN)
+    d.obs(SceneAnswer(label_text="Windshield Washer Fluid", product_class=ProductClass.WASHER_FLUID))
+    assert d.state.step is Step.CONFIRM_PRODUCT
+    d.obs(SceneAnswer(label_text="Rain-X Windshield Washer", product_class=ProductClass.WASHER_FLUID))
+    assert d.state.step is Step.POUR
+    assert d.state.confirmed_product == "Rain-X Windshield Washer"
+
+
+def test_one_label_read_alone_does_not_confirm_product():
+    d = at_open_cap()
+    d.obs(OPEN)
+    d.obs(OPEN)
+    d.obs(SceneAnswer(label_text="Windshield Washer Fluid", product_class=ProductClass.WASHER_FLUID))
+    d.obs(SceneAnswer(label_text=None, product_class=ProductClass.UNREADABLE))
+    d.obs(SceneAnswer(label_text="Windshield Washer Fluid", product_class=ProductClass.WASHER_FLUID))
+    assert d.state.step is Step.CONFIRM_PRODUCT
 
 
 def test_voice_cannot_approve_unknown_product():

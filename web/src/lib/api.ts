@@ -1,5 +1,6 @@
 // 백엔드 계약(backend/carmori/main.py)과 같은 모양을 유지한다.
 import type { ServiceComponent } from "./serviceIntervals";
+import type { NearbyPlace } from "./placeVisits";
 
 export type Step = "FIND_INLET" | "OPEN_CAP" | "CONFIRM_PRODUCT" | "POUR" | "FINISH" | "RECORDED";
 export type WaitReason =
@@ -154,6 +155,8 @@ export interface MaintenanceRecord {
   notes: string | null;
   user_confirmed: boolean;
   photo_data_url: string | null;
+  evidence_frames: string[];
+  model_version: string | null;
 }
 
 export type MajorIssueKind = "accident" | "engine" | "transmission" | "brakes_steering" | "tow_required";
@@ -172,6 +175,13 @@ export interface SessionUpdate {
   transition_reason: string;
   spoken_hint: string | null;
   record: MaintenanceRecord | null;
+  transition_event: TransitionEvidence | null;
+}
+
+export interface TransitionEvidence {
+  from_step: Step; to_step: Step; condition: string; sequence_ids: number[];
+  frame_ids: string[]; model_version: string; decided_at: string;
+  model_duration_ms: number; simulated: boolean;
 }
 
 export type SamTarget = "cap" | "bottle" | "inlet";
@@ -243,6 +253,7 @@ function withBodyStyle(vehicle: Vehicle): Vehicle {
 
 export const api = {
   health: () => call<{ ok: boolean; spark: string; demo_mode: boolean; vision_status: "unverified" | "ready" | "missing_key" | "billing_required" | "unauthorized" | "provider_error" }>("/health"),
+  nearbyPlaces: (lat: number, lon: number) => call<{ places: NearbyPlace[] }>(`/places/nearby?${new URLSearchParams({ lat: String(lat), lon: String(lon) })}`),
   vehicleSpecs: () => call<VehicleSpecView[]>("/vehicle-specs"),
   vehicleMakes: () => call<{ makes: string[]; popular: string[] }>("/vehicle-catalog/makes"),
   vehicleModels: (make: string, year: number | null) =>

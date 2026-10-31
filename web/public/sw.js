@@ -26,6 +26,8 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.pathname.startsWith("/pipecat/")) return;
+  // Vite dev modules: a worker left on a dev origin must not block the code that removes it.
+  if (url.pathname.startsWith("/src/") || url.pathname.startsWith("/@") || url.pathname.startsWith("/node_modules/")) return;
   event.respondWith((async () => {
     const cache = await caches.open(APP_CACHE);
     try {

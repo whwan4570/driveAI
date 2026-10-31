@@ -1,12 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Icon } from "./Icons";
 import { api, type CareResponse, type MaintenanceRecord, type OwnerManualStatus, type Vehicle } from "../lib/api";
-import { intervalRemaining, latestService, loadServiceIntervals, saveServiceInterval, SERVICE_COMPONENTS, type ServiceComponent, type ServiceInterval } from "../lib/serviceIntervals";
+import { intervalRemaining, latestService, loadServiceIntervals, saveServiceInterval, serviceTone, SERVICE_COMPONENTS, type ServiceComponent, type ServiceInterval, type ServiceTone } from "../lib/serviceIntervals";
 import { manufacturerSchedule } from "../lib/manufacturerSchedule";
 import { SAMPLE_SERVICE_REMAINING } from "../lib/statusPreview";
 
 type StatusComponent = ServiceComponent | "washer_fluid";
-type Tone = "unknown" | "good" | "soon" | "due";
 // Same badge table as Home: red due, orange soon, blue needs info, green on track, gray no estimate.
 const BADGE: Record<string, string> = { Warning: "is-danger", Due: "is-danger", "Check soon": "is-warning", "Needs info": "is-info", "On track": "is-success", "No estimate": "" };
 const STATUS_COMPONENTS: { id: StatusComponent; label: string; short: string }[] = [
@@ -123,9 +122,7 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
     const percent = samplePreview ? (id === "washer_fluid" ? null : SAMPLE_SERVICE_REMAINING[id]) : intervalRemaining(record, interval, vehicle?.odometer_km ?? null);
     const recommendation = care?.recommendations.find((item) => item.component === id);
     const manualItem = id === "washer_fluid" ? undefined : manual?.items[id];
-    const tone: Tone = recommendation?.priority === "WARNING" || (percent !== null && percent <= 15) ? "due"
-      : recommendation?.priority === "CHECK_SOON" || (percent !== null && percent <= 35) ? "soon"
-      : recommendation?.priority === "ROUTINE" || percent !== null ? "good" : "unknown";
+    const tone: ServiceTone = serviceTone(percent, recommendation?.priority);
     const label = recommendation?.priority === "WARNING" ? "Warning" : tone === "due" ? "Due" : tone === "soon" ? "Check soon" : tone === "good" ? "On track"
       : recommendation?.priority === "INFORMATION_NEEDED" ? "Needs info" : "No estimate";
     return { record, inspection, interval, percent, recommendation, manualItem, tone, label };
@@ -155,10 +152,10 @@ export function ServiceStatus({ vehicle, records, care, loading, onSaved, onTire
           : id === "brake_pads" || id === "tires" ? inspection ? `Last inspected: ${lastDate}` : record ? `Last changed: ${lastDate}` : "Last inspected: unknown"
           : `Last changed: ${record ? lastDate : "unknown"}`;
         return <div className="service-status-row" key={id}>
-          <button id={`status-detail-${id}`} type="button" className="service-status-trigger" onClick={() => { setSelected(id); setEditing(null); setError(null); }} aria-label={`${label}: ${statusLabel}. View details`} aria-haspopup="dialog">
+          <button id={`status-detail-${id}`} type="button" className="service-status-trigger" onClick={() => { setSelected(id); setEditing(null); setError(null); }} aria-label={`${label}: ${statusLabel}${percent === null ? "" : `. ${percent} percent of service interval remaining`}. View details`} aria-haspopup="dialog">
             <span className="service-status-code">{short}</span>
             <span className="service-status-copy">{!loading && statusLabel !== "No estimate" && <span className={`k-badge ${BADGE[statusLabel]}`}>{statusLabel}</span>}<strong>{label}</strong><small>{loading ? "Checking records…" : subtitle}</small>{!loading && (samplePreview || lastDate) && <em>{historyLine}</em>}</span>
-            <span className={`service-status-value ${tone}`}>{loading || percent === null ? "—" : `${percent}%`}</span>
+            <span className={`service-status-value ${tone}`}>{loading || percent === null ? "—" : <><strong>{percent}%</strong><small>interval left</small></>}</span>
             <Icon name="chevron" size={15}/>
           </button>
           {id !== "washer_fluid" && percent !== null && <div className={`service-status-track ${tone}`} role="meter" aria-label={`${label} interval remaining`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={`${percent} percent remaining`}><span style={{ width: `${percent}%` }}/></div>}

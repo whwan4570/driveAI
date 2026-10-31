@@ -10,10 +10,11 @@ import { api, type CareResponse, type MaintenanceRecord, type MajorIssue, type V
 import { parseUtterance } from "../lib/commands";
 import { DrivingGate } from "../lib/drivingGate";
 import { DriveMetrics, type DriveFix, type DriveSummary } from "../lib/driveMetrics";
+import { PlaceVisitDetector, distanceMetres, readPlaceVisits, saveParkingSpot, savePlaceVisit, type PlaceVisitPrompt } from "../lib/placeVisits";
 import { documentReminder, listDocuments, DOCUMENT_KINDS, type SavedDocument } from "../lib/documentVault";
-import { MAINTENANCE_LABELS } from "../lib/serviceIntervals";
+import { intervalRemaining, latestService, loadServiceIntervals, MAINTENANCE_LABELS, serviceTone, SERVICE_COMPONENTS } from "../lib/serviceIntervals";
 import { completeBrakeAnswer } from "../lib/manualAnswer";
-import { SAMPLE_DRIVE_SUMMARY, sampleStatusCare } from "../lib/statusPreview";
+import { SAMPLE_DRIVE_SUMMARY, SAMPLE_SERVICE_REMAINING, sampleStatusCare } from "../lib/statusPreview";
 import { useUtterances, useVoice } from "../voiceContext";
 import { Captions, type Caption } from "./Captions";
 import { Documents } from "./Documents";
@@ -29,6 +30,9 @@ const SOURCE_LABEL: Record<MaintenanceRecord["completion_source"], string> = {
   user_voice_confirmed: "Confirmed by voice",
   manual_entry: "Added manually",
 };
+function recordSource(record: MaintenanceRecord): string {
+  return record.model_version === "fake-happy-path" ? "Simulated observation" : SOURCE_LABEL[record.completion_source];
+}
 
 function miles(meters: number | null): string {
   if (meters === null) return "—";
@@ -64,6 +68,10 @@ function voiceStartMessage(error: unknown): string {
 
 function trackingPreferenceKey(vehicleId: string): string {
   return `carmori:drive-tracking:${vehicleId}`;
+}
+
+function settingEnabled(key: string): boolean {
+  try { return localStorage.getItem(key) === "on"; } catch { return false; }
 }
 
 export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
@@ -106,7 +114,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const menuPanelRef = useRef<HTMLElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuCloseTimerRef = useRef<number | null>(null);
-  const menuTouchXRef = useRef<number | null>(null);
+  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [recordOpen, setRecordOpen] = useState(false);
   const [tireOpen, setTireOpen] = useState(false);
   const [recordComponent, setRecordComponent] = useState<"washer_fluid" | "tires">("washer_fluid");
@@ -123,6 +131,17 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const [autoMessage, setAutoMessage] = useState("Enable once before your drive");
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [trackingMessage, setTrackingMessage] = useState("Tracking is off");
+  const [visitPrompts, setVisitPrompts] = useState(() => settingEnabled(`carmori:visit-prompts:${vehicleId}`));
+  const [parkingPrompts, setParkingPrompts] = useState(() => settingEnabled(`carmori:parking-prompts:${vehicleId}`));
+  const [placeVisits, setPlaceVisits] = useState(() => readPlaceVisits(vehicleId));
+  const [placePrompt, setPlacePrompt] = useState<PlaceVisitPrompt | { kind: "parking"; fix: DriveFix } | null>(null);
+  const placePromptRef = useRef(false);
+  const visitDetectorRef = useRef(new PlaceVisitDetector(vehicleId));
+  const lastFixRef = useRef<DriveFix | null>(null);
+  const tripOriginRef = useRef<DriveFix | null>(null);
+  const tripDistanceRef = useRef(0);
+  const carConnectedRef = useRef<boolean | null>(null);
+  const lastPlaceLookupRef = useRef(0);
   const metricsRef = useRef<DriveMetrics | null>(null);
   if (metricsRef.current === null) metricsRef.current = new DriveMetrics(vehicleId);
   const [driveSummary, setDriveSummary] = useState<DriveSummary>(() => metricsRef.current!.summary());
@@ -146,6 +165,24 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const busyRef = useRef(false);
   const playBriefingRef = useRef<(source: "manual" | "auto" | "car") => Promise<void>>(async () => undefined);
   const lastSpokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    visitDetectorRef.current = new PlaceVisitDetector(vehicleId);
+    setVisitPrompts(settingEnabled(`carmori:visit-prompts:${vehicleId}`));
+    setParkingPrompts(settingEnabled(`carmori:parking-prompts:${vehicleId}`));
+    setPlaceVisits(readPlaceVisits(vehicleId));
+    lastPlaceLookupRef.current = 0;
+    tripOriginRef.current = null;
+    tripDistanceRef.current = 0;
+  }, [vehicleId]);
+
+  const offerPlacePrompt = (prompt: PlaceVisitPrompt | { kind: "parking"; fix: DriveFix }) => {
+    if (placePromptRef.current) return;
+    placePromptRef.current = true;
+    setPlacePrompt(prompt);
+  };
+
+  const dismissPlacePrompt = () => { placePromptRef.current = false; setPlacePrompt(null); };
   const documentReturnTabRef = useRef<Tab>("home");
   const add = (who: Caption["who"], text: string, sourceUrl?: string, sourceLabel?: string) => setCaptions((c) => [...c, { who, text, sourceUrl, sourceLabel }]);
 
@@ -421,15 +458,27 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   };
   playBriefingRef.current = playBriefing;
 
-  // Play the briefing once each time the phone connects to CarPlay or Android Auto while Carmori is open.
+  // Native connection changes can offer a parking spot after a real trip.
   useEffect(() => {
-    if (!carConnectionAvailable || !carBriefing) return;
+    if (!carConnectionAvailable) return;
     let cancelled = false;
     let playedThisConnection = false;
     const onState = (state: CarState) => {
       if (cancelled) return;
-      if (!state.connected) { playedThisConnection = false; return; }
-      if (playedThisConnection) return;
+      const previous = carConnectedRef.current;
+      carConnectedRef.current = state.connected;
+      if (!state.connected) {
+        playedThisConnection = false;
+        const fix = lastFixRef.current;
+        if (previous && parkingPrompts && fix && fix.accuracy <= 60 && Date.now() - fix.timestamp < 120_000 && tripDistanceRef.current >= 300) {
+          offerPlacePrompt({ kind: "parking", fix });
+        }
+        tripOriginRef.current = null;
+        tripDistanceRef.current = 0;
+        return;
+      }
+      if (!previous) { tripOriginRef.current = lastFixRef.current; tripDistanceRef.current = 0; }
+      if (playedThisConnection || !carBriefing) return;
       playedThisConnection = true;
       void playBriefingRef.current("car");
     };
@@ -439,7 +488,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
       cancelled = true;
       void listener.then((handle) => handle.remove());
     };
-  }, [carBriefing, vehicleId]);
+  }, [carBriefing, parkingPrompts, vehicleId]);
 
   const startVoiceChat = async () => {
     if (!perms.microphone) { setError("Microphone is off. Turn it on in Settings to ask by voice."); return; }
@@ -518,9 +567,24 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
             speed: position.coords.speed,
             timestamp: position.timestamp,
           };
+          lastFixRef.current = fix;
+          if (carConnectedRef.current) {
+            if (!tripOriginRef.current && fix.accuracy <= 60) tripOriginRef.current = fix;
+            if (tripOriginRef.current && fix.accuracy <= 60) tripDistanceRef.current = Math.max(tripDistanceRef.current, distanceMetres(tripOriginRef.current, fix));
+          }
           const summary = metricsRef.current!.observe(fix);
           setDriveSummary(summary);
           syncGps(fix, summary);
+          if (visitPrompts && !placePromptRef.current) {
+            if (fix.accuracy <= 60 && (fix.speed ?? 0) <= 1.5 && Date.now() - lastPlaceLookupRef.current > 120_000) {
+              lastPlaceLookupRef.current = Date.now();
+              void api.nearbyPlaces(fix.latitude, fix.longitude)
+                .then(({ places }) => visitDetectorRef.current.setNearby(places))
+                .catch(() => visitDetectorRef.current.setNearby([]));
+            }
+            const prompt = visitDetectorRef.current.observe(fix);
+            if (prompt) offerPlacePrompt(prompt);
+          }
           if (speedClearTimerRef.current !== null) window.clearTimeout(speedClearTimerRef.current);
           speedClearTimerRef.current = window.setTimeout(() => setDriveSummary(metricsRef.current!.summary()), 21_000);
           if (autoEnabledRef.current && gateRef.current.observe(fix)) {
@@ -669,7 +733,14 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const shownStatusCare = samplePreview ? sampleStatusCare(care) : care;
   const weekHighway = shownDriveSummary.weekMeters ? Math.round((shownDriveSummary.weekHighwayMeters / shownDriveSummary.weekMeters) * 100) : null;
   const activeCareCount = care?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
-  const statusReviewCount = shownStatusCare?.recommendations.filter((item) => item.priority !== "ROUTINE").length ?? 0;
+  const statusReviewComponents = new Set<string>(shownStatusCare?.recommendations.filter((item) => item.priority === "WARNING" || item.priority === "CHECK_SOON").map((item) => item.component) ?? []);
+  const savedServiceIntervals = vehicle ? loadServiceIntervals(vehicle.vehicle_id) : {};
+  for (const { id } of SERVICE_COMPONENTS) {
+    const percent = samplePreview ? SAMPLE_SERVICE_REMAINING[id]
+      : intervalRemaining(latestService(records, id), savedServiceIntervals[id], vehicle?.odometer_km ?? null);
+    if (serviceTone(percent) === "due" || serviceTone(percent) === "soon") statusReviewComponents.add(id);
+  }
+  const statusReviewCount = statusReviewComponents.size;
   const notificationItems = (care?.recommendations.filter((item) => item.priority !== "ROUTINE") ?? [])
     .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
   const documentAlerts = documents.filter((record) => record.vehicleId === vehicleId).flatMap((record) => {
@@ -724,6 +795,15 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
             <div><b>{!samplePreview && care?.environment.status === "available" && care.environment.rainfall_mm !== null ? `${care.environment.rainfall_mm.toFixed(1)} mm` : "—"}</b><span>Rain, 7 days</span></div>
           </div>
         </section>
+        <section className="k-block k-guide-entry" aria-label="Washer fluid camera guide">
+          <div className="k-guide-entry-copy">
+            <span className="k-guide-entry-icon"><Icon name="camera" size={23}/></span>
+            <div><span className="k-guide-entry-label">CAMERA GUIDE</span><h2>Refill washer fluid, hands-free</h2><p>{demoMode ? "Preview the camera flow. Step checks are simulated in Demo Mode." : "Carmori watches the cap, bottle and pour to guide each step."}</p></div>
+          </div>
+          <button className="k-guide-entry-action" type="button" onClick={() => perms.camera ? void beginTask() : openSettings()} disabled={busy}>
+            {perms.camera ? demoMode ? "Preview camera guide" : "Start camera guide" : "Turn on camera"}<Icon name="arrow" size={19}/>
+          </button>
+        </section>
         {notificationItems.length > 0 && <section className="k-block is-list" aria-label="To review">
           <div className="k-block-head"><h2 className="k-h2">To review</h2><button className="k-block-link" type="button" onClick={() => goToTab("status")}>Status<Icon name="chevron" size={14}/></button></div>
           {notificationItems.map((item) => <button className="k-row" type="button" key={item.id} onClick={() => openNotification(item.component)}>
@@ -770,7 +850,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
             <button className="k-block-link" type="button" onClick={openSettings}>Turn on in Settings<Icon name="chevron" size={14}/></button>
           </div>}
         </section>
-        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} care={shownStatusCare} loading={careLoading} samplePreview={samplePreview} showHeader={false}/></Suspense>
+        <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} records={records} care={shownStatusCare} loading={memoryLoading || careLoading} samplePreview={samplePreview} showHeader={false}/></Suspense>
         <ServiceStatus vehicle={vehicle} records={records} care={shownStatusCare} loading={memoryLoading || careLoading} onSaved={refreshData} onTireInspection={() => openRecord("tires")} onWasherGuide={() => void beginTask()} guideBusy={busy} samplePreview={samplePreview}/>
       </div>}
 
@@ -813,11 +893,12 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
         <HistorySummary vehicle={vehicle} issues={majorIssues} issuesLoading={issuesLoading} issuesAvailable={issuesAvailable} onEditVehicle={() => setProfileOpen(true)} onVehicleUpdated={setVehicle} onRefresh={refreshData}/>
         <section className="k-block is-list" aria-label="Driving documents"><button className="k-row" type="button" onClick={openDocuments}><span className="k-row-art"><Icon name="file" size={22}/></span><span className="k-row-main"><strong>Driving documents</strong><small>{documentsError ? "Local storage unavailable" : documentsLoading ? "Checking this device…" : `${savedDocumentCount} of 3 saved offline${documentAlerts[0] ? ` · ${DOCUMENT_KINDS.find((item) => item.kind === documentAlerts[0].record.kind)?.shortLabel} ${documentAlerts[0].reminder.label.toLowerCase()}` : ""}`}</small></span><Icon className="k-row-trail" name="chevron" size={18}/></button></section>
         {recordOpen && vehicle && <RecordForm key={recordComponent} vehicle={vehicle} initialComponent={recordComponent} onSaved={() => { setRecordOpen(false); void refreshData(); }} onCancel={() => setRecordOpen(false)}/>}
-        <section className="k-block is-list history-block" aria-label="History"><div className="k-block-head"><h2 className="k-h2">History</h2><span className="k-block-count">{records.length} confirmed</span></div>
+        <section className="k-block is-list history-block" aria-label="History"><div className="k-block-head"><h2 className="k-h2">History</h2><span className="k-block-count">{records.length + placeVisits.length} confirmed</span></div>
           <div className="history-view-switch" role="group" aria-label="History view"><button type="button" className={historyView === "list" ? "selected" : ""} onClick={() => setHistoryView("list")}>List</button><button type="button" className={historyView === "calendar" ? "selected" : ""} onClick={() => setHistoryView("calendar")}>Calendar</button></div>
           {historyView === "calendar" ? <HistoryCalendar records={records} issues={issuesAvailable ? majorIssues : []}/> : <>
-            {records.length === 0 && <div className="empty-state"><Icon name="history" size={30}/><strong>No records yet</strong><p>Only completed work you confirm will be saved here.</p></div>}
-            {records.map((record) => <div className="history-record" key={record.record_id}><button className="history-item" type="button" onClick={() => setOpenRecordId(openRecordId === record.record_id ? null : record.record_id)} aria-expanded={openRecordId === record.record_id}><span className="history-item-dot"><Icon name="check" size={14}/></span><div><strong>{MAINTENANCE_LABELS[record.component] || record.component} {record.event_type}</strong><p>{new Date(record.completed_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}{record.odometer_km !== null ? ` · ${Math.round(record.odometer_km / 1.609344).toLocaleString()} mi` : ""}</p><span>{SOURCE_LABEL[record.completion_source]}{record.product_label ? ` · ${record.product_label}` : ""}</span></div>{record.photo_data_url && <img className="history-thumb" src={record.photo_data_url} alt="Saved maintenance"/>}<Icon name="chevron" size={16}/></button>{openRecordId === record.record_id && <div className="history-detail"><p>{record.notes || "No notes added."}</p>{record.photo_data_url && <img className="history-photo" src={record.photo_data_url} alt="Maintenance photo"/>}<small>Completion: {SOURCE_LABEL[record.completion_source]}{record.flow_observed ? " · Pour observed by camera" : ""}</small></div>}</div>)}
+            {records.length === 0 && placeVisits.length === 0 && <div className="empty-state"><Icon name="history" size={30}/><strong>No records yet</strong><p>Only completed work you confirm will be saved here.</p></div>}
+            {placeVisits.map((visit) => <div className="history-record" key={visit.id}><div className="history-item"><span className="history-item-dot"><Icon name="check" size={14}/></span><div><strong>{visit.category === "fuel" ? "Refueled" : visit.category === "repair" ? "Service visit" : "Car wash"}</strong><p>{new Date(visit.confirmedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</p><span>{visit.name} · Confirmed by you</span></div></div></div>)}
+            {records.map((record) => <div className="history-record" key={record.record_id}><button className="history-item" type="button" onClick={() => setOpenRecordId(openRecordId === record.record_id ? null : record.record_id)} aria-expanded={openRecordId === record.record_id}><span className="history-item-dot"><Icon name="check" size={14}/></span><div><strong>{MAINTENANCE_LABELS[record.component] || record.component} {record.event_type}</strong><p>{new Date(record.completed_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}{record.odometer_km !== null ? ` · ${Math.round(record.odometer_km / 1.609344).toLocaleString()} mi` : ""}</p><span>{recordSource(record)}{record.product_label ? ` · ${record.product_label}` : ""}</span></div>{record.photo_data_url && <img className="history-thumb" src={record.photo_data_url} alt="Saved maintenance"/>}<Icon name="chevron" size={16}/></button>{openRecordId === record.record_id && <div className="history-detail"><p>{record.notes || "No notes added."}</p>{record.photo_data_url && <img className="history-photo" src={record.photo_data_url} alt="Maintenance photo"/>}<small>Completion: {recordSource(record)}{record.flow_observed && record.completion_source === "observed_sequence" && record.model_version !== "fake-happy-path" ? " · Pour observed by camera" : ""}{record.evidence_frames?.length ? " · Observation references saved" : ""}</small></div>}</div>)}
           </>}
           <button className="k-row is-add" type="button" onClick={() => { setRecordComponent("washer_fluid"); setRecordOpen(true); }}><span className="k-row-art"><Icon name="plus" size={22}/></span><span className="k-row-main"><strong>Add completed work</strong></span></button>
         </section>
@@ -829,9 +910,10 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     </main>
     {!profileOpen && perms.microphone && tab !== "assistant" && tab !== "documents" && <button className={`floating-mic${fabHidden ? " is-hidden" : ""}`} type="button" onClick={() => void startVoiceChat()} disabled={busy} aria-label="Ask by voice" aria-hidden={fabHidden} tabIndex={fabHidden ? -1 : 0} title="Ask by voice"><Icon name="mic" size={25}/></button>}
     <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id || (tab === "documents" && item.id === "history") ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
+    {placePrompt && <div className="place-prompt-backdrop" role="presentation"><section className="place-prompt" role="dialog" aria-modal="true" aria-labelledby="place-prompt-title"><span className="place-prompt-kicker">{placePrompt.kind === "parking" ? "Parked car" : placePrompt.name}</span><h2 id="place-prompt-title">{placePrompt.kind === "parking" ? "Remember this parking spot?" : placePrompt.category === "fuel" ? "Did you refuel?" : placePrompt.category === "repair" ? "Did you get service?" : "Did you wash your car?"}</h2><p>{placePrompt.kind === "parking" ? "Car connection ended after a drive. Save your last phone location in Places?" : "You stopped near this place. Save a visit only if it happened."}</p><div className="place-prompt-actions"><button type="button" onClick={dismissPlacePrompt}>Not now</button><button type="button" onClick={() => { if (placePrompt.kind === "parking") { try { saveParkingSpot(vehicleId, placePrompt.fix); } catch { setError("Could not save this parking spot on this device."); } } else { try { savePlaceVisit(vehicleId, placePrompt); setPlaceVisits(readPlaceVisits(vehicleId)); } catch { setError("Could not save this visit on this device."); } } dismissPlacePrompt(); }}>{placePrompt.kind === "parking" ? "Save spot" : "Yes, save"}</button></div></section></div>}
     {menuMounted && <>
       <div className={`side-menu-backdrop${menuOpen ? " is-open" : ""}`} onClick={closeMenu} aria-hidden="true"/>
-      <aside ref={menuPanelRef} className={`side-menu${menuOpen ? " is-open" : ""}`} id="carmori-side-menu" role="dialog" aria-modal="true" aria-hidden={!menuOpen} aria-label={menuView === "menu" ? "Menu" : menuView === "my-profile" ? "My profile" : "Settings"} onTouchStart={(event) => { menuTouchXRef.current = event.touches[0]?.clientX ?? null; }} onTouchEnd={(event) => { if (menuTouchXRef.current !== null && event.changedTouches[0]?.clientX - menuTouchXRef.current > 70) closeMenu(); menuTouchXRef.current = null; }}>
+      <aside ref={menuPanelRef} className={`side-menu${menuOpen ? " is-open" : ""}`} id="carmori-side-menu" role="dialog" aria-modal="true" aria-hidden={!menuOpen} aria-label={menuView === "menu" ? "Menu" : menuView === "my-profile" ? "My profile" : "Settings"} onTouchStart={(event) => { const touch = event.touches[0]; menuTouchRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null; }} onTouchEnd={(event) => { const start = menuTouchRef.current; const touch = event.changedTouches[0]; if (start && touch && touch.clientX - start.x > 70 && Math.abs(touch.clientX - start.x) > Math.abs(touch.clientY - start.y) * 1.5) closeMenu(); menuTouchRef.current = null; }} onTouchCancel={() => { menuTouchRef.current = null; }}>
         <div className="side-menu-header"><span>{menuView === "menu" ? "Carmori" : menuView === "my-profile" ? "My profile" : "Settings"}</span><button type="button" onClick={closeMenu} aria-label="Close menu"><Icon name="close" size={20}/></button></div>
         {menuView === "menu" ? <>
           <button className="side-menu-identity" type="button" onClick={() => setMenuView("my-profile")}><span className="side-menu-avatar"><Icon name="profile" size={25}/></span><span><strong>My profile</strong><small>Local prototype</small></span></button>
@@ -845,6 +927,8 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
               <p className="settings-group">Location</p>
               <div className="settings-row"><span><strong>Location</strong><small>{permissionStatusText(perms.location, permStates.location)}</small></span><button type="button" role="switch" className="k-switch" aria-checked={permissionOn("location")} aria-label="Location access" disabled={false} onClick={() => void setPermission("location", !permissionOn("location"))}/></div>
               <div className="settings-row"><span><strong>Drive tracking</strong><small>{perms.location ? trackingMessage : "Needs location"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={trackingEnabled} aria-label="Drive tracking" disabled={!perms.location} onClick={toggleStatusTracking}/></div>
+              <div className="settings-row"><span><strong>Ask after a place visit</strong><small>When stopped near a gas station, repair shop, or car wash. Sends your location to OpenStreetMap while on.</small></span><button type="button" role="switch" className="k-switch" aria-checked={visitPrompts} aria-label="Ask after a place visit" disabled={!perms.location || !trackingEnabled} onClick={() => { const next = !visitPrompts; localStorage.setItem(`carmori:visit-prompts:${vehicleId}`, next ? "on" : "off"); setVisitPrompts(next); if (!next) visitDetectorRef.current.setNearby([]); }}/></div>
+              {carConnectionAvailable && <div className="settings-row"><span><strong>Remember parking</strong><small>Ask after CarPlay or Android Auto disconnects following a drive. Saves only after you confirm.</small></span><button type="button" role="switch" className="k-switch" aria-checked={parkingPrompts} aria-label="Remember parking" disabled={!perms.location || !trackingEnabled} onClick={() => { const next = !parkingPrompts; localStorage.setItem(`carmori:parking-prompts:${vehicleId}`, next ? "on" : "off"); setParkingPrompts(next); }}/></div>}
               <div className="settings-row"><span><strong>Play briefing when driving</strong><small>{perms.location ? (autoEnabled ? autoMessage : "Plays once driving movement is detected") : "Needs location"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={autoEnabled} aria-label="Play briefing when driving" disabled={!perms.location} onClick={toggleAutoBriefing}/></div>
               <div className="settings-row"><span><strong>Compass</strong><small>{perms.motion ? "Points Find my car toward your car" : "Off · Find my car shows distance only"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={perms.motion} aria-label="Compass access" onClick={() => void setPermission("motion", !perms.motion)}/></div>
               <p className="settings-group">Voice</p>

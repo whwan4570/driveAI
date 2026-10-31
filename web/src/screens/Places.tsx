@@ -5,7 +5,7 @@ import { requestBrowserPermission } from "../lib/permissions";
 import { api, type CareResponse, type WasherShoppingPick } from "../lib/api";
 
 type ParkingSpot = { lat: number; lon: number; accuracy: number; savedAt: string; note: string };
-type Garage = { id: string; name: string; address: string };
+type Garage = { id: string; name: string; address: string; lat?: number; lon?: number };
 
 function readLocal<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; }
@@ -52,15 +52,25 @@ function SavedPlacesSection({ storageKey, title, subtitle, icon, mapsQuery, noun
   const [saved, setSaved] = useState<Garage[]>(() => readLocal(storageKey, []));
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [pin, setPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [pinError, setPinError] = useState("");
   const [adding, setAdding] = useState(false);
   const plural = noun.endsWith("sh") ? `${noun}es` : `${noun}s`;
 
   const add = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
-    const next = [...saved, { id: crypto.randomUUID(), name: name.trim(), address: address.trim() }];
+    const next = [...saved, { id: crypto.randomUUID(), name: name.trim(), address: address.trim(), ...(pin ?? {}) }];
     localStorage.setItem(storageKey, JSON.stringify(next)); setSaved(next);
-    setName(""); setAddress(""); setAdding(false);
+    setName(""); setAddress(""); setPin(null); setAdding(false);
+  };
+
+  const pinHere = async () => {
+    try {
+      const position = await locate();
+      if (position.coords.accuracy > 100) { setPinError("Location is too imprecise. Try again outdoors."); return; }
+      setPin({ lat: position.coords.latitude, lon: position.coords.longitude }); setPinError("");
+    } catch { setPinError("Could not get your location. Check location permission."); }
   };
 
   const remove = (id: string) => {
@@ -72,9 +82,9 @@ function SavedPlacesSection({ storageKey, title, subtitle, icon, mapsQuery, noun
     <div className="places-card-heading"><span className="places-icon"><Icon name={icon} size={23}/></span><div><h2>{title}</h2><p>{subtitle}</p></div></div>
     <a className="places-primary places-full places-link" href={`https://maps.apple.com/?q=${encodeURIComponent(mapsQuery)}`} target="_blank" rel="noopener noreferrer">Find {plural} in Maps <Icon name="arrow" size={17}/></a>
     <div className="places-saved-heading"><h3>Saved {plural}</h3><button type="button" onClick={() => setAdding((value) => !value)}>{adding ? "Cancel" : `+ Add ${noun}`}</button></div>
-    {adding && <form className="places-garage-form k-form" onSubmit={add}><input aria-label={`${noun} name`} placeholder={`${noun[0].toUpperCase()}${noun.slice(1)} name`} value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required/><input aria-label={`${noun} address`} placeholder="Address (optional)" value={address} onChange={(event) => setAddress(event.target.value)} maxLength={160}/><button className="places-primary" type="submit">Save {noun}</button></form>}
+    {adding && <form className="places-garage-form k-form" onSubmit={add}><input aria-label={`${noun} name`} placeholder={`${noun[0].toUpperCase()}${noun.slice(1)} name`} value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required/><input aria-label={`${noun} address`} placeholder="Address (optional)" value={address} onChange={(event) => setAddress(event.target.value)} maxLength={160}/><button type="button" onClick={() => void pinHere()}>{pin ? "Current location pinned" : "Pin current location"}</button>{pinError && <small role="alert">{pinError}</small>}<button className="places-primary" type="submit">Save {noun}</button></form>}
     {saved.length === 0 && !adding && <p className="places-empty">No saved {plural} yet.</p>}
-    {saved.map((item) => <div className="places-garage" key={item.id}><div><strong>{item.name}</strong>{item.address && <span>{item.address}</span>}</div><button type="button" onClick={() => remove(item.id)} aria-label={`Remove ${item.name}`}>Remove</button></div>)}
+    {saved.map((item) => <div className="places-garage" key={item.id}><div><strong>{item.name}</strong>{item.address && <span>{item.address}</span>}{typeof item.lat === "number" && <span>Location pinned for visit prompts</span>}</div><button type="button" onClick={() => remove(item.id)} aria-label={`Remove ${item.name}`}>Remove</button></div>)}
   </section>;
 }
 
@@ -89,6 +99,12 @@ export function Places({ vehicleId, care, onAskMuse, locationAllowed, cameraAllo
   const [shopping, setShopping] = useState<WasherShoppingPick | null>(null);
   const [shoppingError, setShoppingError] = useState(false);
   const [shoppingLoading, setShoppingLoading] = useState(true);
+
+  useEffect(() => {
+    const update = (event: Event) => { if ((event as CustomEvent<{ vehicleId: string }>).detail?.vehicleId === vehicleId) setParking(readLocal(parkingKey, null)); };
+    window.addEventListener("carmori:parking-saved", update);
+    return () => window.removeEventListener("carmori:parking-saved", update);
+  }, [parkingKey, vehicleId]);
 
   useEffect(() => {
     let active = true;
@@ -175,6 +191,7 @@ export function Places({ vehicleId, care, onAskMuse, locationAllowed, cameraAllo
       {parkingError && <p className="places-error" role="alert">{parkingError}</p>}
     </section>
 
+    <SavedPlacesSection storageKey={`carmori:fuel-stations:${vehicleId}`} title="Gas stations" subtitle="Keep a station you use" icon="pin" mapsQuery="gas station" noun="station"/>
     <SavedPlacesSection storageKey={`carmori:garages:${vehicleId}`} title="Repair shops" subtitle="Find a shop or keep one you trust" icon="status" mapsQuery="auto repair" noun="shop"/>
     <SavedPlacesSection storageKey={`carmori:car-washes:${vehicleId}`} title="Car washes" subtitle="Find a wash nearby or keep your usual one" icon="car" mapsQuery="car wash" noun="car wash"/>
     {arOpen && parking && <FindCarAR spot={parking} compassAllowed={compassAllowed} onClose={() => setArOpen(false)}/>}

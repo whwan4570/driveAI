@@ -24,6 +24,7 @@ from .models import (
     CompletionSource,
     Observation,
     Pending,
+    ProductClass,
     SceneAnswer,
     SessionState,
     Step,
@@ -146,7 +147,7 @@ def transition(
     if count < rules.required_agreements:
         state = state.model_copy(
             update={
-                "pending": Pending(key=verdict.key, frame_ids=frames, count=count),
+                "pending": Pending(key=verdict.key, frame_ids=frames, count=count, sequence_ids=[*(pending.sequence_ids if pending and pending.key == verdict.key else []), obs.sequence_id]),
                 "waiting_reason": None,
             }
         )
@@ -218,7 +219,8 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
             return _Verdict("wait", "inlet_occluded", wait_reason=WaitReason.OCCLUDED)
         if a.inlet_visible is Tri.YES and a.inlet_symbol_ok is Tri.NO:
             return _Verdict("wait", "wrong_part", wait_reason=WaitReason.WRONG_PART)
-        if a.inlet_visible is Tri.YES and a.inlet_symbol_ok is Tri.YES:
+        if a.inlet_visible is Tri.YES and (a.inlet_symbol_ok is Tri.YES or
+                                           (a.inlet_symbol_ok is Tri.UNCLEAR and a.inlet_shape_ok is Tri.YES)):
             if a.cap_state is CapState.CLOSED:
                 return _Verdict("satisfied", key="inlet_found")
             if a.cap_state is CapState.OPEN:
@@ -234,10 +236,14 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
         return _Verdict("not_yet", "open_cap")
 
     if step is Step.CONFIRM_PRODUCT:
+        if a.occluded:
+            return _Verdict("wait", "product_unknown", wait_reason=WaitReason.PRODUCT_UNKNOWN)
         verdict = evaluate_product(a.label_text, a.product_class, spec)
         if verdict is ProductVerdict.MATCH:
-            return _Verdict("satisfied", key=f"product:{normalize_label(a.label_text or '')}")
-        if verdict is ProductVerdict.CONFLICT:
+            # Both frames must pass the label rule, but OCR rarely reads a real bottle identically twice.
+            return _Verdict("satisfied", key="product_match")
+        # A clearly different item has no washer label to read, so "cannot read the label" would mislead.
+        if verdict is ProductVerdict.CONFLICT or (a.product_class is ProductClass.OTHER and not a.label_text):
             return _Verdict("wait", "product_conflict", wait_reason=WaitReason.PRODUCT_CONFLICT)
         return _Verdict("wait", "product_unknown", wait_reason=WaitReason.PRODUCT_UNKNOWN)
 
