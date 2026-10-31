@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi.testclient import TestClient
 
 from carmori.config import Settings
@@ -108,6 +109,29 @@ def test_model_failure_clears_pending_and_does_not_advance():
     spark.fail = False
     retry = client.post(f"/sessions/{sid}/observations", json={"windows": [windows(3)["windows"][0]]}).json()
     assert retry["session"]["step"] == "FIND_INLET" and retry["transition_event"] is None
+
+
+def test_mixed_model_results_keep_billing_error_and_do_not_advance():
+    class BillingOnSecondWindow(HappyPathSpark):
+        calls = 0
+
+        async def analyze(self, frames, step, reference=None):
+            self.calls += 1
+            if self.calls == 2:
+                request = httpx.Request("POST", "https://example.test/vision")
+                response = httpx.Response(402, request=request)
+                raise httpx.HTTPStatusError("billing required", request=request, response=response)
+            return await super().analyze(frames, step, reference)
+
+    client = TestClient(create_app(Settings(), spark=BillingOnSecondWindow()))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+    result = client.post(f"/sessions/{sid}/observations", json=windows(1)).json()
+    assert result["transition_reason"] == "model_billing_required"
+    assert result["transition_event"] is None
+    assert result["session"]["step"] == "FIND_INLET"
+    assert all(not window["accepted"] for window in result["windows"])
+    assert client.get("/health").json()["vision_status"] == "billing_required"
 
 
 class UnseenPourSpark(HappyPathSpark):

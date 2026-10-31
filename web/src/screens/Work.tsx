@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon, Waveform } from "../components/Icons";
 import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
-import { FULL_FRAME, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
+import { cameraFrameIsBlank, FULL_FRAME, grabJpeg, openRearCamera, roiAround, waitForCameraFrame, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
 import { WorkSessionController } from "../lib/workSession";
 import { useUtterances, useVoice } from "../voiceContext";
@@ -42,6 +42,9 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const videoRef = useRef<HTMLVideoElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<WorkSessionController | null>(null);
+  const commandQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingCommandsRef = useRef(0);
+  const [commandPending, setCommandPending] = useState(false);
   const roiRef = useRef<Roi>(FULL_FRAME);
   const stepRef = useRef<Step | null>(null);
   const roiSelectedRef = useRef(false);
@@ -197,6 +200,25 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         timer = window.setTimeout(search, 1000);
         return;
       }
+      try {
+        await waitForCameraFrame(video);
+        if (cancelled) return;
+        if (cameraFrameIsBlank(video)) {
+          if (++frameWaits >= 12) {
+            setError("The camera preview is visible, but captured frames are blank. Reopen the guide or try another browser.");
+            setSearchFinished(true);
+            return;
+          }
+          timer = window.setTimeout(search, 700);
+          return;
+        }
+      } catch {
+        if (!cancelled) {
+          setError("The camera frame could not be captured. Reopen the guide or try another browser.");
+          setSearchFinished(true);
+        }
+        return;
+      }
       setVideoSize((size) => size.width === video.videoWidth && size.height === video.videoHeight ? size : { width: video.videoWidth, height: video.videoHeight });
       count += 1;
       setSearchPass(count);
@@ -282,7 +304,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     try {
       await controllerRef.current?.scanLabel();
     } catch {
-      setError("The label could not be checked. Try again.");
+      if (!failurePausedRef.current) setError("The label could not be checked. Try again.");
     } finally {
       setScanningLabel(false);
     }
@@ -319,19 +341,29 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     }
   };
 
-  const sendIntent = async (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") => {
-    try {
-      controllerRef.current?.invalidateInFlight();
-      const update = await api.voice(sessionId, intent, via);
-      setSession(update.session);
-      previousStepRef.current = update.session.step;
-      controllerRef.current?.setStateVersion(update.session.state_version);
-      controllerRef.current?.setPaused(update.session.paused || failurePausedRef.current);
-      if (intent === "RESTART") controllerRef.current?.start();
-      await say(update.spoken_hint);
-    } catch {
-      setError("I could not process that command. Please try again.");
-    }
+  const sendIntent = (sessionId: string, intent: VoiceIntent, via: "voice" | "touch" = "voice") => {
+    pendingCommandsRef.current++;
+    setCommandPending(true);
+    const run = async () => {
+      try {
+        controllerRef.current?.invalidateInFlight();
+        const update = await api.voice(sessionId, intent, via);
+        setSession(update.session);
+        previousStepRef.current = update.session.step;
+        controllerRef.current?.setStateVersion(update.session.state_version);
+        controllerRef.current?.setPaused(update.session.paused || failurePausedRef.current);
+        if (intent === "RESTART") controllerRef.current?.start();
+        await say(update.spoken_hint);
+      } catch {
+        setError("I could not process that command. Please try again.");
+      } finally {
+        pendingCommandsRef.current--;
+        if (pendingCommandsRef.current === 0) setCommandPending(false);
+      }
+    };
+    const queued = commandQueueRef.current.then(run, run);
+    commandQueueRef.current = queued;
+    return queued;
   };
 
   useUtterances(async (text) => {
@@ -397,7 +429,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         <strong>{current && current.number > 0 ? `${current.number}/4 · ${current.title}` : current?.title ?? "Washer fluid refill"}</strong>
         <div className="arw-progress-track">{[1, 2, 3, 4].map((n) => <i key={n} className={current && (done || current.number >= n) ? "filled" : ""}/>)}</div>
       </div>
-      {session && !done && <button type="button" className="arw-pause" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE", "touch")} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button>}
+      {session && !done && <button type="button" className="arw-pause" onClick={() => void sendIntent(session.session_id, session.paused ? "RESUME" : "PAUSE", "touch")} disabled={commandPending} aria-label={session.paused ? "Resume guide" : "Pause guide"}><Icon name={session.paused ? "play" : "pause"} size={18}/></button>}
       <span className="arw-live"><span/>{demoMode ? "DEMO" : "LIVE"}</span>
     </header>
     {(transitionMessage || evidenceOpen) && evidence && <button type="button" className="arw-transition" onClick={() => setEvidenceOpen(!evidenceOpen)} aria-expanded={evidenceOpen}><Icon name="check" size={19}/>{transitionMessage ?? "Observation confirmed"}<span>Details</span></button>}
@@ -422,7 +454,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
           <h1>{anchor ? "Keep the phone still and start" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
           <p>{anchor ? "Check the washer symbol on the marked cap." : "I'll look for the cap, or tap it on screen."}</p>
-          {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {searchPass > 0 ? `${searchPass} of ${INLET_SEARCH_ROIS.length}` : ""}</p>}
+          {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {searchPass > 0 ? `${searchPass} of ${INLET_SEARCH_ROIS.length}` : ""}{inspection?.status === "uncertain" ? ` · ${inspection.observation}` : ""}</p>}
           {inspection && !searchingInlet && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
           {searchFinished && !anchor && <p className="arw-note">Move closer or try another angle.</p>}
           <div className="arw-actions">

@@ -147,6 +147,10 @@ export class WorkSessionController {
       const second = this.scanWindow();
       const update = await api.observe(this.deps.sessionId, [first, second], this.stateVersion);
       if (epoch === this.epoch) this.deps.onUpdate(update, "label_scan");
+    } catch (error) {
+      if (epoch !== this.epoch) return;
+      this.deps.onError(error);
+      throw error;
     } finally {
       this.inFlight = false;
       this.gate.reset(performance.now());

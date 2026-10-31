@@ -25,7 +25,13 @@ export async function openRearCamera(video: HTMLVideoElement, size: { width: num
   video.srcObject = stream;
   video.muted = true;
   video.playsInline = true;
-  await video.play();
+  try {
+    await video.play();
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop());
+    video.srcObject = null;
+    throw error;
+  }
   return stream;
 }
 
@@ -62,4 +68,30 @@ export function grabGray(video: HTMLVideoElement, roi: Roi, side = 64): Uint8Arr
     gray[i] = (data[i * 4] * 77 + data[i * 4 + 1] * 150 + data[i * 4 + 2] * 29) >> 8;
   }
   return gray;
+}
+
+/** Wait for an actual camera frame, not just loaded video metadata. */
+export function waitForCameraFrame(video: HTMLVideoElement, timeoutMs = 1200): Promise<void> {
+  if (typeof video.requestVideoFrameCallback !== "function") {
+    return new Promise((resolve) => window.setTimeout(resolve, 100));
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    video.requestVideoFrameCallback(finish);
+  });
+}
+
+/** A visible video element can briefly yield a black canvas frame on mobile. */
+export function cameraFrameIsBlank(video: HTMLVideoElement, roi: Roi = FULL_FRAME): boolean {
+  const pixels = grabGray(video, roi, 40);
+  let brightest = 0;
+  for (const value of pixels) brightest = Math.max(brightest, value);
+  return brightest < 12;
 }

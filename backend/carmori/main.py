@@ -765,23 +765,24 @@ def create_app(
         reference = reference_frames.get(session_id)
         decoded = [[base64.b64decode(f.jpeg_base64) for f in w.frames] for w in windows]
 
-        async def analyze(frames: list[bytes]) -> SceneAnswer | None:
+        async def analyze(frames: list[bytes]) -> tuple[SceneAnswer | None, str | None]:
             try:
                 answer = await asyncio.wait_for(
                     spark.analyze(frames, snapshot.step, reference), settings.spark_timeout_s
                 )
-                model_access["status"] = "ready"
-                return answer
+                return answer, None
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
-                model_access["status"] = "billing_required" if status == 402 else "unauthorized" if status in (401, 403) else "provider_error"
-                return None
+                return None, "model_billing_required" if status == 402 else "model_unauthorized" if status in (401, 403) else "model_error"
             except Exception:  # noqa: BLE001 - 모델 실패는 대기로 처리한다
-                return None
+                return None, "model_error"
 
         started = time.perf_counter()
-        answers = await asyncio.gather(*(analyze(frames) for frames in decoded))
+        analyzed = await asyncio.gather(*(analyze(frames) for frames in decoded))
         duration_ms = (time.perf_counter() - started) * 1000
+        answers = [answer for answer, _ in analyzed]
+        errors = {error for _, error in analyzed if error}
+        failure_reason = next((reason for reason in ("model_billing_required", "model_unauthorized", "model_error") if reason in errors), None)
 
         async with locks[session_id]:
             state = session_or_404(session_id)
@@ -792,23 +793,24 @@ def create_app(
                     spoken_hint=None,
                     windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason="superseded", answer=None) for w in windows],
                 )
+            model_access["status"] = (
+                "billing_required" if failure_reason == "model_billing_required" else
+                "unauthorized" if failure_reason == "model_unauthorized" else
+                "provider_error" if failure_reason else "ready"
+            )
             results: list[WindowResult] = []
             last_reason = "no_change"
             hint: str | None = None
             record: MaintenanceRecord | None = None
             event: TransitionEvidence | None = None
-            if any(answer is None for answer in answers):
+            if failure_reason is not None:
                 state = state.model_copy(update={"pending": None})
                 store.save_session(state)
-                reason = "model_billing_required" if model_access["status"] == "billing_required" else "model_unauthorized" if model_access["status"] == "unauthorized" else "model_error"
-                return SessionUpdate(session=SessionView.of(state), transition_reason=reason, spoken_hint=None,
-                                     windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason=reason, answer=None) for w in windows])
+                return SessionUpdate(session=SessionView.of(state), transition_reason=failure_reason, spoken_hint=None,
+                                     windows=[WindowResult(sequence_id=w.sequence_id, accepted=False, reason=failure_reason, answer=None) for w in windows])
             for window, frames, answer in zip(windows, decoded, answers):
                 if answer is None:
-                    reason = "model_billing_required" if model_access["status"] == "billing_required" else "model_unauthorized" if model_access["status"] == "unauthorized" else "model_error"
-                    results.append(WindowResult(sequence_id=window.sequence_id, accepted=False, reason=reason, answer=None))
-                    last_reason = reason
-                    continue
+                    raise AssertionError("model failure must return before transition evaluation")
                 obs = Observation(
                     session_id=session_id,
                     sequence_id=window.sequence_id,

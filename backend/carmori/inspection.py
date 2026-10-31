@@ -94,6 +94,13 @@ class MetaInspector:
         if component == "washer_fluid":
             box = parsed.get("box")
             basis = parsed.get("basis")
+            model_observation = parsed.get("observation")
+            unclear_message = "I couldn't verify the washer cap. Try another angle or check your vehicle manual."
+            if isinstance(model_observation, str):
+                if any(word in model_observation.lower() for word in ("black", "dark", "underexposed")):
+                    unclear_message = "The captured camera frame is too dark. Add light and try again."
+                elif any(word in model_observation.lower() for word in ("blurry", "blurred", "out of focus")):
+                    unclear_message = "The captured camera frame is blurry. Hold the phone still and try again."
             valid_box = (
                 isinstance(box, list) and len(box) == 4 and all(isinstance(x, (int, float)) and 0 <= x <= 1 for x in box)
                 and box[0] < box[2] and box[1] < box[3]
@@ -102,7 +109,7 @@ class MetaInspector:
             return InspectionResult(
                 status="located" if located else "uncertain", component="washer_fluid",
                 observation=("Washer symbol found on the marked cap." if basis == "symbol" else "Likely washer cap on the narrow filler neck. Check the cap before opening it.") if located
-                else "I couldn't verify the washer cap. Try another angle or check your vehicle manual.",
+                else unclear_message,
                 box=box if located else None, confidence=confidence, source="meta_vision",
             )
         observation = parsed.get("observation") if isinstance(parsed.get("observation"), str) else "The tire photo was unclear."

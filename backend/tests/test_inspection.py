@@ -62,6 +62,16 @@ def test_blue_color_or_unexplained_box_alone_cannot_locate_inlet():
     assert result.box is None
 
 
+def test_black_camera_reply_gives_a_specific_retry_hint():
+    class Spark:
+        async def _vision_request(self, prompt: str, images: list[bytes]) -> str:
+            return '{"located":false,"confidence":"low","basis":"uncertain","box":null,"observation":"Frame is black; no engine bay visible"}'
+
+    result = __import__("asyncio").run(MetaInspector(Spark()).analyze(b"image", "washer_fluid", "engine"))
+    assert result.status == "uncertain"
+    assert "too dark" in result.observation
+
+
 def test_product_photo_requires_readable_washer_label():
     class Spark:
         async def _vision_request(self, prompt: str, images: list[bytes]) -> str:

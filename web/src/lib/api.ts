@@ -228,6 +228,16 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: "POST", body: JSON.stringify(body) });
 
+async function postWithTimeout<T>(path: string, body: unknown, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await call<T>(path, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function bodyStyleKey(vehicleId: string): string { return `carmori:body-style:${vehicleId}`; }
 function issueConfirmationKey(vehicleId: string): string { return `carmori:issue-confirmed:${vehicleId}`; }
 function rememberBodyStyle(vehicleId: string, style: Vehicle["body_style"]): void {
@@ -324,14 +334,14 @@ export const api = {
   addRecord: (body: { vehicle_id: string; component: "washer_fluid" | ServiceComponent; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
   analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire"; jpeg_base64: string }) =>
-    post<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body),
+    postWithTimeout<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body, 30_000),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),
   ask: (vehicleId: string, question: string, sessionId?: string) =>
     post<{ text: string; fact_ids: string[]; source_url?: string | null; source_label?: string | null }>("/assistant/ask", { vehicle_id: vehicleId, question, session_id: sessionId }),
   startSession: (vehicleId: string) => post<SessionUpdate>("/sessions", { vehicle_id: vehicleId }),
   observe: (sessionId: string, windows: WindowIn[], expectedStateVersion: number) =>
-    post<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows, expected_state_version: expectedStateVersion }),
+    postWithTimeout<SessionUpdate>(`/sessions/${sessionId}/observations`, { windows, expected_state_version: expectedStateVersion }, 30_000),
   trackClip: (sessionId: string, target: SamTarget, mp4: Blob) =>
     call<SamVideoResult>(`/sessions/${sessionId}/tracks?target=${target}`, {
       method: "POST", headers: { "Content-Type": "video/mp4" }, body: mp4,
