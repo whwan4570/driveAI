@@ -12,8 +12,8 @@ type Finding = InspectionResult["tire_findings"][number];
 const WHEELS = [
   { label: "Driver front", short: "DF" },
   { label: "Driver rear", short: "DR" },
-  { label: "Passenger front", short: "PF" },
   { label: "Passenger rear", short: "PR" },
+  { label: "Passenger front", short: "PF" },
 ] as const;
 const STEPS = WHEELS.flatMap((_, wheel) => ([{ wheel, view: "sidewall" as const }, { wheel, view: "tread" as const }]));
 const VIEW_TIP: Record<View, string> = {
@@ -28,6 +28,7 @@ const TOO_DARK_BRIGHTNESS = 30;
 const MOVED_DIFFERENCE = 11;
 
 function averageDifference(a: Uint8Array, b: Uint8Array): number {
+  if (a.length !== b.length) return Infinity;
   let total = 0;
   for (let i = 0; i < a.length; i++) total += Math.abs(a[i] - b[i]);
   return total / a.length;
@@ -112,10 +113,16 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
   const acceptedFrameRef = useRef<Uint8Array | null>(null);
   const movementNeededRef = useRef(false);
   const stableCountRef = useRef(0);
-  const lastAttemptRef = useRef(0);
+  const lastAttemptRef = useRef(-Infinity);
   const activeIndexRef = useRef(0);
   const gaugeWheelRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef(0);
+  const bestFrameRef = useRef<{ score: number; jpeg: string; gray: Uint8Array } | null>(null);
+  const [captureNotice, setCaptureNotice] = useState("");
+  const [retryRequired, setRetryRequired] = useState(false);
+  const [selectedWheel, setSelectedWheel] = useState<number | null>(null);
+  const [swapWheel, setSwapWheel] = useState<number | null>(null);
   const outlineFrameRef = useRef<Uint8Array | null>(null);
   const [outline, setOutline] = useState<{ box: Box; label: string } | null>(null);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
@@ -169,6 +176,9 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
   }, [cameraAttempt]);
 
   useEffect(() => {
+    requestRef.current += 1;
+    lastAttemptRef.current = -Infinity;
+    bestFrameRef.current = null;
     previousFrameRef.current = null;
     stableCountRef.current = 0;
     movementNeededRef.current = scanIndex > 0 && acceptedFrameRef.current !== null;
@@ -179,6 +189,14 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       setStatus(step.view === "sidewall" && scanIndex > 0 ? `Walk to the ${WHEELS[step.wheel].label.toLowerCase()} wheel. ${VIEW_TIP.sidewall}` : VIEW_TIP[step.view]);
     }
   }, [scanIndex]);
+
+  useEffect(() => {
+    if (!captureNotice) return;
+    const timer = window.setTimeout(() => setCaptureNotice(""), 2400);
+    return () => window.clearTimeout(timer);
+  }, [captureNotice]);
+
+  useEffect(() => () => { requestRef.current += 1; }, []);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -192,6 +210,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     if (inFlightRef.current || complete) return;
     const index = scanIndex;
     const step = STEPS[index];
+    const request = ++requestRef.current;
     inFlightRef.current = true;
     lastAttemptRef.current = performance.now();
     setBusy(true);
@@ -201,12 +220,20 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       const response = await api.analyzeInspection(vehicle.vehicle_id, {
         component: "tires", photo_type: step.view === "sidewall" ? "tire_sidewall" : "tire_tread", jpeg_base64: jpeg,
       });
-      if (activeIndexRef.current !== index) return;
+      if (activeIndexRef.current !== index || requestRef.current !== request) return;
       if (response.status === "located" && response.tire_view_valid && response.source === "meta_vision") {
         acceptedFrameRef.current = frame;
         const photo = `data:image/jpeg;base64,${jpeg}`;
-        setShots((previous) => [...previous, { wheel: step.wheel, view: step.view, photo, result: response }]);
-        setScanIndex(index + 1);
+        setShots((previous) => [...previous.filter((shot) => shot.wheel !== step.wheel || shot.view !== step.view), { wheel: step.wheel, view: step.view, photo, result: response }]);
+        setCaptureNotice(step.view === "sidewall" ? "Sidewall captured ✓" : `${WHEELS[step.wheel].label} complete ✓`);
+        if (step.view === "tread") {
+          try { navigator.vibrate?.(80); } catch { /* Vibration is optional. */ }
+        }
+        setRetryRequired(false);
+        const updatedShots = [...shots.filter((shot) => shot.wheel !== step.wheel || shot.view !== step.view), { wheel: step.wheel, view: step.view, photo, result: response }];
+        const sameWheelNext = STEPS.findIndex((candidate) => candidate.wheel === step.wheel && !updatedShots.some((shot) => shot.wheel === candidate.wheel && shot.view === candidate.view));
+        const next = sameWheelNext >= 0 ? sameWheelNext : STEPS.findIndex((candidate) => !updatedShots.some((shot) => shot.wheel === candidate.wheel && shot.view === candidate.view));
+        setScanIndex(next < 0 ? STEPS.length : next);
       } else {
         acceptedFrameRef.current = frame;
         movementNeededRef.current = frame !== null;
@@ -214,12 +241,17 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         const hint = box ? aimHint(box) : null;
         setStatus(hint && response.rejection_reason !== "too_small" ? `${response.observation} ${hint}.` : response.observation);
         // The box belongs to this frame, so it is only drawn for live shots and until the phone moves.
-        outlineFrameRef.current = box && frame ? frame : null;
-        setOutline(box && frame ? { box, label: hint && response.rejection_reason !== "too_small" ? hint : QUALITY_LABEL[response.rejection_reason ?? "unclear"] } : null);
+        let stillCurrent = false;
+        if (box && frame && videoRef.current?.videoWidth) {
+          try { stillCurrent = averageDifference(frame, grabGray(videoRef.current, FULL_FRAME, 48)) <= MOVED_DIFFERENCE; } catch { /* Camera closed. */ }
+        }
+        outlineFrameRef.current = stillCurrent ? frame : null;
+        setOutline(box && frame && stillCurrent ? { box, label: hint && response.rejection_reason !== "too_small" ? hint : QUALITY_LABEL[response.rejection_reason ?? "unclear"] } : null);
       }
     } catch {
-      if (activeIndexRef.current === index) {
-        setError("Image analysis is unavailable. Your place is saved; try this view again.");
+      if (activeIndexRef.current === index && requestRef.current === request) {
+        setRetryRequired(true);
+        setError("Analysis paused. Your photos are kept; try this view again.");
         setStatus("Check paused");
       }
     } finally {
@@ -232,7 +264,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
 
   const captureNow = () => {
     const video = videoRef.current;
-    if (!cameraReady || !video?.videoWidth || inFlightRef.current) return;
+    if (!cameraReady || !video?.videoWidth || inFlightRef.current || retryRequired) return;
     try {
       const frame = grabGray(video, FULL_FRAME, 48);
       if (averageBrightness(frame) < TOO_DARK_BRIGHTNESS) { setStatus("It's too dark here. Add light or change the angle."); return; }
@@ -244,7 +276,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     if (!cameraReady || complete) return;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
-      if (!video?.videoWidth || inFlightRef.current || busy || activeIndexRef.current !== scanIndex) return;
+      if (!video?.videoWidth || inFlightRef.current || busy || retryRequired || activeIndexRef.current !== scanIndex) return;
       let frame: Uint8Array;
       try { frame = grabGray(video, FULL_FRAME, 48); }
       catch { return; }
@@ -259,14 +291,24 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       previousFrameRef.current = frame;
       if (!previous) return;
       stableCountRef.current = averageDifference(frame, previous) < 4 ? stableCountRef.current + 1 : 0;
+      if (!stableCountRef.current) bestFrameRef.current = null;
+      if (stableCountRef.current && !movementNeededRef.current && averageBrightness(frame) >= TOO_DARK_BRIGHTNESS) {
+        let score = 0;
+        for (let i = 1; i < frame.length; i++) score += Math.abs(frame[i] - frame[i - 1]);
+        if (!bestFrameRef.current || score > bestFrameRef.current.score) {
+          try { bestFrameRef.current = { score, jpeg: grabJpeg(video, FULL_FRAME, 1600, 0.82), gray: frame }; } catch { /* Wait for the next frame. */ }
+        }
+      }
       // Local checks run first, so a dark or moving view does not use a model call.
       if (averageBrightness(frame) < TOO_DARK_BRIGHTNESS) { stableCountRef.current = 0; setStatus("It's too dark here. Add light or change the angle."); return; }
       if (!movementNeededRef.current && stableCountRef.current === 0) setStatus("Hold still…");
       if (movementNeededRef.current || stableCountRef.current < 3 || performance.now() - lastAttemptRef.current < 5000) return;
-      captureNow();
+      const best = bestFrameRef.current;
+      bestFrameRef.current = null;
+      if (best) void analyzePhoto(best.jpeg, best.gray);
     }, 400);
     return () => window.clearInterval(timer);
-  }, [cameraReady, complete, scanIndex, busy]);
+  }, [cameraReady, complete, scanIndex, busy, retryRequired]);
 
   useEffect(() => {
     if (gaugeWheel === null) return;
@@ -375,25 +417,27 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
           : <span className="tire-looking" aria-hidden="true">{busy ? "Checking this view…" : `Looking for the ${current.view === "sidewall" ? "sidewall" : "tread"}`}</span>)}
       {cameraFailure && <p className="arw-no-camera" role="alert">{cameraFailure}</p>}
     </div>
+    {captureNotice && <div className="tire-capture-notice" role="status">{captureNotice}</div>}
     <header className="arw-top">
       <button type="button" className="arw-icon" aria-label="Close tire guide" onClick={onCancel}><Icon name="close" size={22}/></button>
-      <div className="arw-progress"><strong>{gaugeWheel !== null ? `Read gauge · ${WHEELS[gaugeWheel].label}` : complete ? "Tire check complete" : `${scanIndex + 1}/8 · ${WHEELS[current.wheel].label} · ${current.view}`}</strong><div className="arw-progress-track">{STEPS.map((_, index) => <i key={index} className={index < scanIndex ? "filled" : ""}/>)}</div></div>
+      <div className="arw-progress"><strong>{gaugeWheel !== null ? `Read gauge · ${WHEELS[gaugeWheel].label}` : complete ? "Tire check complete" : `${shots.length + 1}/8 · ${WHEELS[current.wheel].label} · ${current.view}`}</strong><div className="arw-progress-track">{STEPS.map((_, index) => <i key={index} className={shots.some((shot) => shot.wheel === STEPS[index].wheel && shot.view === STEPS[index].view) ? "filled" : ""}/>)}</div></div>
       {cameraReady && (!complete || gaugeWheel !== null) && <span className="arw-live"><span/>LIVE</span>}
     </header>
     {!complete && <div className="tire-route" aria-label="Tire check order">
       <span className="tire-route-car">FRONT<br/>CAR<br/>REAR</span>
-      {WHEELS.map((wheel, index) => <span key={wheel.short} className={`tire-route-wheel wheel-${index}${index === current.wheel ? " active" : ""}${index < current.wheel ? " checked" : ""}`} aria-label={`${wheel.label}${index === current.wheel ? ", current" : index < current.wheel ? ", checked" : ""}`}>{index === current.wheel ? "➜" : index < current.wheel ? "✓" : "·"}<small>{wheel.short}</small></span>)}
+      {WHEELS.map((wheel, index) => <button type="button" key={wheel.short} disabled={busy || shots.filter((shot) => shot.wheel === index).length === 2} onClick={() => { const next = STEPS.findIndex((step) => step.wheel === index && !shots.some((shot) => shot.wheel === index && shot.view === step.view)); if (next < 0) return; requestRef.current += 1; setRetryRequired(false); setError(null); setScanIndex(next); }} className={`tire-route-wheel wheel-${index}${index === current.wheel ? " active" : ""}${shots.filter((shot) => shot.wheel === index).length === 2 ? " checked" : ""}`} aria-label={`Check ${wheel.label}`}>{index === current.wheel ? "➜" : shots.filter((shot) => shot.wheel === index).length === 2 ? "✓" : "·"}<small>{wheel.short}</small></button>)}
     </div>}
     <input ref={inputRef} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void upload(event.target.files?.[0]); event.target.value = ""; }}/>
     <div className="arw-bottom">
       {error && <div className="arw-error" role="alert">{error}</div>}
       {!complete ? <section className="arw-card tire-guide-card" aria-live="polite">
-        <span className="arw-status"><span className="arw-dot"/>{busy ? "Analyzing camera view" : cameraFailure ? "Camera unavailable" : "Auto capture on"}</span>
+        <span className="arw-status"><span className="arw-dot"/>{busy ? "Analyzing camera view" : retryRequired ? "Analysis paused" : cameraFailure ? "Camera unavailable" : "Auto capture on"}</span>
         <h1>{WHEELS[current.wheel].label}: show the {current.view}</h1>
-        <p>{status}</p>
+        <p>{retryRequired ? "Analysis paused. Retry when connected." : status}</p>
+        {current.view === "tread" && shots.find((shot) => shot.wheel === current.wheel && shot.view === "sidewall") && <div className="tire-last-shot"><img src={shots.find((shot) => shot.wheel === current.wheel && shot.view === "sidewall")?.photo} alt="Captured sidewall"/><span>Sidewall captured ✓<br/>Now show the tread grooves.</span></div>}
         <div className="arw-actions">
           <button type="button" className="arw-secondary" onClick={() => inputRef.current?.click()} disabled={busy}><Icon name="file" size={18}/>Upload view</button>
-          {cameraFailure ? <button type="button" className="arw-primary" onClick={() => setCameraAttempt((attempt) => attempt + 1)}><Icon name="camera" size={18}/>Try camera again</button>
+          {retryRequired ? <button type="button" className="arw-primary" onClick={() => { setRetryRequired(false); setError(null); lastAttemptRef.current = -Infinity; movementNeededRef.current = false; setStatus(VIEW_TIP[current.view]); }}>Retry analysis</button> : cameraFailure ? <button type="button" className="arw-primary" onClick={() => setCameraAttempt((attempt) => attempt + 1)}><Icon name="camera" size={18}/>Try camera again</button>
             : <button type="button" className="arw-primary" onClick={captureNow} disabled={!cameraReady || busy}><Icon name="camera" size={18}/>{busy ? "Checking…" : "Scan now"}</button>}
         </div>
       </section> : gaugeWheel !== null ? <section className="arw-card tire-guide-card" aria-live="polite">
@@ -406,10 +450,19 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       </section> : <form className="arw-card tire-guide-summary" onSubmit={(event) => void save(event)}>
         <span className={`tire-result-tone ${result?.tone}`}>Four tires · Eight camera views</span>
         <h1>{result?.title}</h1><p>{result?.detail}</p>
+        <div className="tire-summary-map" aria-label="Select a tire to see its results">{WHEELS.map((wheel, index) => {
+          const wheelShots = shots.filter((shot) => shot.wheel === index);
+          const findings = wheelShots.flatMap((shot) => shot.result.tire_findings);
+          const tone = wheelShots.length < 2 ? "unknown" : findings.some((item) => ["bulge", "cut", "crack", "wear_bar_level"].includes(item)) || (depths[index] !== "" && Number(depths[index]) <= 1.6) ? "warning" : findings.length ? "soon" : depths[index] ? "clear" : "unknown";
+          return <button key={wheel.short} type="button" className={`tire-map-wheel wheel-${index} ${tone}`} aria-pressed={selectedWheel === index} onClick={() => setSelectedWheel(index)}>{wheel.label}</button>;
+        })}</div>
+        <p>Tap a tire for its photos and readings.</p>
         <div className="tire-wheel-results">{WHEELS.map((wheel, index) => {
           const wheelShots = shots.filter((shot) => shot.wheel === index);
-          return <div className="tire-wheel-result" key={wheel.short}><strong>{wheel.label}</strong>{wheelShots.map((shot) => <span key={shot.view}>{shot.view === "sidewall" ? "Sidewall" : "Tread"}: {shot.result.tire_findings.length ? shot.result.tire_findings.map(findingLabel).join(", ") : "no visible issue"}</span>)}<span className={depths[index] ? "tire-measured" : "tire-not-measured"}>Tread depth: {depths[index] ? `${depths[index]} mm${gaugePhotos[index] ? " (gauge photo, confirmed)" : " (entered)"}` : "not measured"}</span><span className="tire-not-measured">Pressure: not measured</span><div>{wheelShots.map((shot) => <img key={shot.view} src={shot.photo} alt={`${wheel.label} ${shot.view}`}/>)}</div><button type="button" className="tire-gauge-action" onClick={() => { setGaugeWheel(index); setGaugeSuggestion(null); setError(null); }}>Read gauge with camera</button><label>Confirmed tread (mm)<input type="number" min="0" max="30" step="0.1" inputMode="decimal" value={depths[index]} onChange={(event) => { setDepths((values) => values.map((value, i) => i === index ? event.target.value : value)); setGaugePhotos((values) => values.map((value, i) => i === index ? null : value)); }} placeholder="Optional"/></label></div>;
+          return <div className="tire-wheel-result" key={wheel.short} hidden={selectedWheel !== index}><strong>{wheel.label}</strong>{wheelShots.map((shot) => <span key={shot.view}>{shot.view === "sidewall" ? "Sidewall" : "Tread"}: {shot.result.tire_findings.length ? shot.result.tire_findings.map(findingLabel).join(", ") : "no visible issue"}</span>)}<span className={depths[index] ? "tire-measured" : "tire-not-measured"}>Tread depth: {depths[index] ? `${depths[index]} mm${gaugePhotos[index] ? " (gauge photo, confirmed)" : " (entered)"}` : "not measured"}</span><span className="tire-not-measured">Pressure: not measured</span><div>{wheelShots.map((shot) => <img key={shot.view} src={shot.photo} alt={`${wheel.label} ${shot.view}`}/>)}</div>{wheelShots.map((shot) => <button type="button" className="tire-gauge-action" key={`retake-${shot.view}`} onClick={() => { setShots((items) => items.filter((item) => item.wheel !== index || item.view !== shot.view)); setConfirmed(false); setRetryRequired(false); setError(null); setScanIndex(STEPS.findIndex((step) => step.wheel === index && step.view === shot.view)); }}>Retake {shot.view}</button>)}<button type="button" className="tire-gauge-action" onClick={() => { setGaugeWheel(index); setGaugeSuggestion(null); setError(null); }}>Read gauge with camera</button><label>Confirmed tread (mm)<input type="number" min="0" max="30" step="0.1" inputMode="decimal" value={depths[index]} onChange={(event) => { setDepths((values) => values.map((value, i) => i === index ? event.target.value : value)); setGaugePhotos((values) => values.map((value, i) => i === index ? null : value)); }} placeholder="Optional"/></label></div>;
         })}</div>
+        <label className="tire-swap-label">Correct tire positions<select value={swapWheel ?? ""} onChange={(event) => setSwapWheel(event.target.value === "" ? null : Number(event.target.value))}><option value="">Choose a tire to swap</option>{WHEELS.map((wheel, index) => <option key={wheel.short} value={index}>{wheel.label}</option>)}</select></label>
+        {swapWheel !== null && <div className="tire-swap-actions">{WHEELS.map((wheel, index) => index !== swapWheel && <button type="button" key={wheel.short} onClick={() => { const other = swapWheel; setShots((items) => items.map((shot) => ({ ...shot, wheel: shot.wheel === other ? index : shot.wheel === index ? other : shot.wheel }))); setDepths((values) => values.map((value, i) => i === other ? values[index] : i === index ? values[other] : value)); setGaugePhotos((values) => values.map((value, i) => i === other ? values[index] : i === index ? values[other] : value)); setSwapWheel(null); setConfirmed(false); }}>Swap with {wheel.label}</button>)}</div>}
         <p className="tire-measure-note">A visible gauge reading can be read from the camera after you confirm it. Tire photos alone cannot measure depth or pressure. Wheel positions follow the order you checked.</p>
         <label className="record-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/><span>I checked these four tire positions.</span></label>
         <button type="submit" className="arw-primary" disabled={!confirmed || busy}>{busy ? "Saving…" : "Save tire check"}</button>
