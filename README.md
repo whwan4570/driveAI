@@ -8,6 +8,8 @@ Washer-fluid refills are a routine task across vehicle makes, yet finding the ri
 
 **[Demo sequence](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
 
+**Live prototype:** [Open Carmori](https://driveai-ni3a.onrender.com/) on a phone or desktop. The hosted HTTPS app needs no local setup; allow camera and microphone access to try the guides. The [local setup](#run-it-locally) below is for development and reproduction.
+
 ### Why this matters
 
 Owners often have to identify an unfamiliar part, read instructions, handle a bottle, and record the work at the same time. A phone guide that watches the task can keep their hands free and avoid claiming a step was completed when the view is unclear. The first audience is owners doing simple, low-risk care themselves; broader maintenance tasks require vehicle-specific validation.
@@ -163,6 +165,8 @@ The proposed deployment separates the web/API service from the GPU worker; the e
 
 ## Run it locally
 
+For the hosted prototype, use the [live Carmori URL](https://driveai-ni3a.onrender.com/). These steps are for running or modifying the repository on your own machine.
+
 Requires Python 3.10+, Node 22 and pnpm.
 
 ```bash
@@ -218,7 +222,7 @@ Open `https://<Mac IP>:5174` in Safari. Keep `ca.key` and `server.key` private.
 
 1. In Render, choose **New → Blueprint**, then pick this repository.
 2. Enter `META_API_KEY` when asked.
-3. Deploy, then open `https://<service>.onrender.com`.
+3. Deploy, then open your Render service URL. The current public deployment is [driveai-ni3a.onrender.com](https://driveai-ni3a.onrender.com/).
 
 The Blueprint uses the paid **Starter** plan and a 1 GB disk at `/var/data`. Render bills both by the time used. The disk keeps SQLite, downloaded manuals and 3D models through deploys and restarts, and Starter does not sleep. On the free plan the server sleeps after 15 minutes idle and loses saved data on restart. Switch the plan back and remove the disk when the demo is over.
 
