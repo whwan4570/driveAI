@@ -32,7 +32,8 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 - A step advances only when **two separate observations agree**.
 - **UNKNOWN means wait.** If the cap is blocked, the label can't be read or the pour is hidden, Carmori holds the step and says why.
 - **Voice cannot approve** a product or an inlet that the camera has not confirmed.
-- **A wrong product stops the flow:** "This isn't washer fluid. Don't pour it." (for example coolant or a coffee cup).
+- **A wrong product stops the flow:** "This isn't washer fluid. Show a washer-fluid bottle before pouring." (for example coolant or a coffee cup).
+- **Finishing needs a closed cap in view.** After the pour, Carmori saves the record only when it sees the cap closed.
 - **A late answer can't skip ahead.** Old answers are dropped by sequence number and state version.
 - **Records say where they came from.** A refill seen on camera is saved as `observed_sequence`. If the pour was hidden, Carmori asks, and saves `user_voice_confirmed` only after you say yes.
 - Carmori never estimates the fluid level or how much you poured.
@@ -57,8 +58,8 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 | 0:00–0:25 | In the car, play the briefing on **Home** | A spoken summary from saved records, with captions. |
 | 0:25–0:50 | Ask "Why should I check the washer fluid?" | The answer separates what is known from what isn't. |
 | 0:50–1:20 | **Refill washer fluid, hands-free** on Home (or **Guide → Washer fluid**), then mount the phone | The inlet pin appears. Lift the cap, and the step moves on without a tap. |
-| 1:20–1:55 | Hold up the bottle, then pour with both hands | The label match card, then the pour cue. Optional: show coolant first to get "This isn't washer fluid." |
-| 1:55–2:25 | Stand the bottle up and close the cap | The record is saved from what the camera saw. |
+| 1:20–1:55 | Hold up the bottle, then pour with both hands | The label match card, then the pour cue. Optional: show coolant first to get "This isn't washer fluid. Show a washer-fluid bottle before pouring." |
+| 1:55–2:25 | Close the cap and leave it in view | The record is saved from what the camera saw. |
 | 2:25–3:00 | Back in the car, ask "What did I do today?" | The answer uses the new record. |
 
 **If something goes wrong on stage:** cover the cap with your hand. Carmori waits and says the view is blocked, then resumes on the same step. Showing this on purpose is a good way to show the safety rules.
