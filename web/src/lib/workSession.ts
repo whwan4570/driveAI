@@ -20,6 +20,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export interface WorkSessionDeps {
   video: HTMLVideoElement;
   getRoi: () => Roi;
+  canObserve?: () => boolean;
   /** Longest side of observation frames; the label step needs more pixels than the inlet steps. */
   getMaxSide: () => number;
   sessionId: string;
@@ -98,7 +99,7 @@ export class WorkSessionController {
 
   private tick = () => {
     const { video, getRoi } = this.deps;
-    if (this.paused || this.inFlight || video.readyState < 2) return;
+    if (this.paused || this.inFlight || this.deps.canObserve?.() === false || video.readyState < 2) return;
     this.gate.sample(grabGray(video, getRoi()), performance.now());
   };
 
@@ -158,7 +159,7 @@ export class WorkSessionController {
   }
 
   private async onTrigger(reason: TriggerReason) {
-    if (this.inFlight || this.paused) return;
+    if (this.inFlight || this.paused || this.deps.canObserve?.() === false) return;
     this.inFlight = true;
     const epoch = this.epoch;
     const expectedVersion = this.stateVersion;

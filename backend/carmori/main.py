@@ -745,7 +745,10 @@ def create_app(
         except Exception as exc:  # noqa: BLE001 - never expose provider details or key
             _carmori_log.warning("SAM video tracking failed: %s", type(exc).__name__)
             raise HTTPException(502, "SAM video tracking is unavailable") from exc
-        if session_or_404(session_id).state_version != snapshot.state_version:
+        current = session_or_404(session_id)
+        # Observation requests update the version even while the camera stays on the
+        # same step. Tracking is only a visual cue, so discard it on a step change.
+        if current.step != snapshot.step or current.paused:
             raise HTTPException(409, "session changed; discard these tracks")
         return result
 

@@ -2,9 +2,8 @@ import type { CSSProperties } from "react";
 import type { Step, WaitReason } from "../lib/api";
 
 /**
- * Step cue drawn over the live camera at the washer inlet. The phone stays on a mount, so the
- * point the user tapped (or the box found in the photo) keeps marking the inlet in the live view.
- * This is a 2D overlay at a fixed spot, not tracked 3D AR.
+ * Step cue drawn at the latest verified camera coordinate. The caller hides the cue
+ * when the camera moves or the tracking result no longer matches the live scene.
  */
 export function InletCue({ left, top, step, waiting, paused }: {
   left: number | string;

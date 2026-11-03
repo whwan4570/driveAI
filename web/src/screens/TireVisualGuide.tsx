@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
 import { api, type InspectionResult, type TireViewQuality, type Vehicle } from "../lib/api";
-import { cameraFailureMessage, FULL_FRAME, grabGray, grabJpeg, openRearCamera } from "../lib/camera";
+import { cameraFailureMessage, FULL_FRAME, grabGray, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
+import { captureTrackingFrame, type TrackingFrame } from "../lib/localVisualTracking";
 import { photoFromFile } from "../lib/photos";
-import { aimHint, averageBrightness, boxOnCoverView, type Box } from "../lib/tireGuide";
+import { aimHint, averageBrightness, boxOnCoverView, trackTireBoxLocally, type Box } from "../lib/tireGuide";
 
 type View = "sidewall" | "tread";
 type Shot = { wheel: number; view: View; photo: string; result: InspectionResult };
@@ -26,6 +27,17 @@ const QUALITY_LABEL: Record<TireViewQuality, string> = {
 };
 const TOO_DARK_BRIGHTNESS = 30;
 const MOVED_DIFFERENCE = 11;
+
+function focusRoi(box: Box | null): Roi {
+  if (!box) return FULL_FRAME;
+  const span = Math.max(box[2] - box[0], box[3] - box[1]);
+  if (span < 0.15 || span > 0.65) return FULL_FRAME;
+  return roiAround((box[0] + box[2]) / 2, (box[1] + box[3]) / 2, Math.max(0.65, Math.min(1, span * 1.4)));
+}
+
+function boxInFrame(box: Box, roi: Roi): Box {
+  return [roi.x + box[0] * roi.w, roi.y + box[1] * roi.h, roi.x + box[2] * roi.w, roi.y + box[3] * roi.h];
+}
 
 function averageDifference(a: Uint8Array, b: Uint8Array): number {
   if (a.length !== b.length) return Infinity;
@@ -118,12 +130,12 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
   const gaugeWheelRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef(0);
-  const bestFrameRef = useRef<{ score: number; jpeg: string; gray: Uint8Array } | null>(null);
+  const bestFrameRef = useRef<{ score: number; jpeg: string; gray: Uint8Array; roi: Roi } | null>(null);
   const [captureNotice, setCaptureNotice] = useState("");
   const [retryRequired, setRetryRequired] = useState(false);
   const [selectedWheel, setSelectedWheel] = useState<number | null>(null);
   const [swapWheel, setSwapWheel] = useState<number | null>(null);
-  const outlineFrameRef = useRef<Uint8Array | null>(null);
+  const trackedOutlineRef = useRef<{ frame: TrackingFrame; box: Box; label: string; index: number } | null>(null);
   const [outline, setOutline] = useState<{ box: Box; label: string } | null>(null);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [cameraReady, setCameraReady] = useState(false);
@@ -182,7 +194,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     previousFrameRef.current = null;
     stableCountRef.current = 0;
     movementNeededRef.current = scanIndex > 0 && acceptedFrameRef.current !== null;
-    outlineFrameRef.current = null;
+    trackedOutlineRef.current = null;
     setOutline(null);
     if (scanIndex < STEPS.length) {
       const step = STEPS[scanIndex];
@@ -206,7 +218,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     return () => observer.disconnect();
   }, []);
 
-  const analyzePhoto = async (jpeg: string, frame: Uint8Array | null) => {
+  const analyzePhoto = async (jpeg: string, frame: Uint8Array | null, roi: Roi = FULL_FRAME) => {
     if (inFlightRef.current || complete) return;
     const index = scanIndex;
     const step = STEPS[index];
@@ -237,7 +249,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       } else {
         acceptedFrameRef.current = frame;
         movementNeededRef.current = frame !== null;
-        const box = response.tire_box as Box | null;
+        const box = response.tire_box ? boxInFrame(response.tire_box as Box, roi) : null;
         const hint = box ? aimHint(box) : null;
         setStatus(hint && response.rejection_reason !== "too_small" ? `${response.observation} ${hint}.` : response.observation);
         // The box belongs to this frame, so it is only drawn for live shots and until the phone moves.
@@ -245,12 +257,18 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         if (box && frame && videoRef.current?.videoWidth) {
           try { stillCurrent = averageDifference(frame, grabGray(videoRef.current, FULL_FRAME, 48)) <= MOVED_DIFFERENCE; } catch { /* Camera closed. */ }
         }
-        outlineFrameRef.current = stillCurrent ? frame : null;
-        setOutline(box && frame && stillCurrent ? { box, label: hint && response.rejection_reason !== "too_small" ? hint : QUALITY_LABEL[response.rejection_reason ?? "unclear"] } : null);
+        const label = hint && response.rejection_reason !== "too_small" ? hint : QUALITY_LABEL[response.rejection_reason ?? "unclear"];
+        const visible = box && frame && stillCurrent && videoRef.current ? { box, label } : null;
+        try {
+          trackedOutlineRef.current = visible && videoRef.current ? { ...visible, frame: captureTrackingFrame(videoRef.current), index } : null;
+        } catch { trackedOutlineRef.current = null; }
+        setOutline(trackedOutlineRef.current ? visible : null);
       }
     } catch {
       if (activeIndexRef.current === index && requestRef.current === request) {
         setRetryRequired(true);
+        trackedOutlineRef.current = null;
+        setOutline(null);
         setError("Analysis paused. Your photos are kept; try this view again.");
         setStatus("Check paused");
       }
@@ -268,7 +286,8 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     try {
       const frame = grabGray(video, FULL_FRAME, 48);
       if (averageBrightness(frame) < TOO_DARK_BRIGHTNESS) { setStatus("It's too dark here. Add light or change the angle."); return; }
-      void analyzePhoto(grabJpeg(video, FULL_FRAME, 1600, 0.82), frame);
+      const roi = focusRoi(trackedOutlineRef.current?.index === scanIndex ? trackedOutlineRef.current.box : null);
+      void analyzePhoto(grabJpeg(video, roi, 1600, 0.82), frame, roi);
     } catch { setError("The camera frame could not be captured. Try again."); }
   };
 
@@ -283,10 +302,6 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       if (movementNeededRef.current && acceptedFrameRef.current && averageDifference(frame, acceptedFrameRef.current) > MOVED_DIFFERENCE) {
         movementNeededRef.current = false;
       }
-      if (outlineFrameRef.current && averageDifference(frame, outlineFrameRef.current) > MOVED_DIFFERENCE) {
-        outlineFrameRef.current = null;
-        setOutline(null);
-      }
       const previous = previousFrameRef.current;
       previousFrameRef.current = frame;
       if (!previous) return;
@@ -296,7 +311,10 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         let score = 0;
         for (let i = 1; i < frame.length; i++) score += Math.abs(frame[i] - frame[i - 1]);
         if (!bestFrameRef.current || score > bestFrameRef.current.score) {
-          try { bestFrameRef.current = { score, jpeg: grabJpeg(video, FULL_FRAME, 1600, 0.82), gray: frame }; } catch { /* Wait for the next frame. */ }
+          try {
+            const roi = focusRoi(trackedOutlineRef.current?.index === scanIndex ? trackedOutlineRef.current.box : null);
+            bestFrameRef.current = { score, jpeg: grabJpeg(video, roi, 1600, 0.82), gray: frame, roi };
+          } catch { /* Wait for the next frame. */ }
         }
       }
       // Local checks run first, so a dark or moving view does not use a model call.
@@ -305,10 +323,28 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
       if (movementNeededRef.current || stableCountRef.current < 3 || performance.now() - lastAttemptRef.current < 5000) return;
       const best = bestFrameRef.current;
       bestFrameRef.current = null;
-      if (best) void analyzePhoto(best.jpeg, best.gray);
+      if (best) void analyzePhoto(best.jpeg, best.gray, best.roi);
     }, 400);
     return () => window.clearInterval(timer);
   }, [cameraReady, complete, scanIndex, busy, retryRequired]);
+
+  useEffect(() => {
+    if (!cameraReady || complete || gaugeWheel !== null || retryRequired) return;
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      const target = trackedOutlineRef.current;
+      if (!video?.videoWidth || !target || target.index !== scanIndex || document.hidden) return;
+      try {
+        const frame = captureTrackingFrame(video);
+        const box = trackTireBoxLocally(target.frame, frame, target.box);
+        if (!box) { trackedOutlineRef.current = null; setOutline(null); return; }
+        const label = aimHint(box) ?? (target.label.startsWith("Aim the phone") ? "Tire found" : target.label);
+        trackedOutlineRef.current = { frame, box, label, index: scanIndex };
+        setOutline({ box, label });
+      } catch { trackedOutlineRef.current = null; setOutline(null); }
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [cameraReady, complete, scanIndex, gaugeWheel, retryRequired]);
 
   useEffect(() => {
     if (gaugeWheel === null) return;

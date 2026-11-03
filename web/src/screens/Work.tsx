@@ -4,6 +4,7 @@ import { Icon, Waveform } from "../components/Icons";
 import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
 import { cameraFailureMessage, cameraFrameIsBlank, FULL_FRAME, grabGray, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
+import { captureTrackingFrame, frameDifference, trackPointLocally, type TrackingFrame } from "../lib/localVisualTracking";
 import { parseUtterance } from "../lib/commands";
 import { WorkSessionController } from "../lib/workSession";
 import { useUtterances, useVoice } from "../voiceContext";
@@ -46,6 +47,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const pendingCommandsRef = useRef(0);
   const [commandPending, setCommandPending] = useState(false);
   const roiRef = useRef<Roi>(FULL_FRAME);
+  const localTrackSeedRef = useRef<TrackingFrame | null>(null);
   const labelRoiRef = useRef<Roi>(FULL_FRAME);
   const stepRef = useRef<Step | null>(null);
   const roiSelectedRef = useRef(false);
@@ -53,6 +55,11 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [roiSelected, setRoiSelected] = useState(false);
   // Where the inlet is in the camera frame (0–1): the tapped point, or the box found in a live capture.
   const [inletPoint, setInletPoint] = useState<{ x: number; y: number } | null>(null);
+  const inletPointRef = useRef<{ x: number; y: number } | null>(null);
+  const updateInletPoint = (point: { x: number; y: number } | null) => {
+    inletPointRef.current = point;
+    setInletPoint(point);
+  };
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [session, setSession] = useState<SessionView | null>(null);
@@ -256,7 +263,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         const point = { x: (box[0] + box[2]) / 2, y: (box[1] + box[3]) / 2 };
         setCandidatePoint(point);
         setInspection({ ...candidate, observation: "Checking the highlighted area. Hold still." });
-        const crop = roiAround(point.x, point.y, 0.35);
+        // Keep the filler neck in view. A cap-only crop was ambiguous in portrait video.
+        const crop = roiAround(point.x, point.y, 0.45);
         const firstTime = video.currentTime;
         const firstImage = grabJpeg(video, crop, 1920, 0.85);
         await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
@@ -292,11 +300,12 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         }
         const x = (second[0] + second[2]) / 2;
         const y = (second[1] + second[3]) / 2;
+        localTrackSeedRef.current = captureTrackingFrame(video);
         roiRef.current = roiAround(x, y);
         roiSelectedRef.current = true;
         setInspection({ ...results[1], box: second });
         setCandidatePoint(null);
-        setInletPoint({ x, y });
+        updateInletPoint({ x, y });
         setRoiSelected(true);
       } catch {
         if (!cancelled) { setError("Camera analysis is unavailable. Check your connection and try again."); setSearchFinished(true); }
@@ -323,7 +332,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       // Nothing can verify a tap in Demo Mode; the tapped point marks the inlet directly.
       roiRef.current = roiAround(x, y);
       roiSelectedRef.current = true;
-      setInletPoint({ x, y });
+      updateInletPoint({ x, y });
       setRoiSelected(true);
       return;
     }
@@ -335,6 +344,12 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   const applyUpdate = (u: SessionUpdate) => {
     setSession(u.session);
+    if (u.transition_event?.to_step === "POUR") {
+      // The opened cap can leave the filler neck. Find the open inlet again.
+      roiRef.current = FULL_FRAME;
+      localTrackSeedRef.current = null;
+      updateInletPoint(null);
+    }
     if (u.session.step === "CONFIRM_PRODUCT") {
       const readable = u.windows.map((window) => window.answer?.label_text?.trim()).filter((label): label is string => !!label);
       setLabelRead(readable.at(-1)?.slice(0, 80) ?? null);
@@ -397,7 +412,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         video,
         // The bottle is held wherever the driver stands, so the label step cannot use the inlet crop.
         getRoi: () => stepRef.current === "CONFIRM_PRODUCT" ? labelRoiRef.current : roiRef.current,
-        getMaxSide: () => stepRef.current === "CONFIRM_PRODUCT" ? 1600 : 768,
+        canObserve: () => stepRef.current === "CONFIRM_PRODUCT" || stepRef.current === "POUR" || stepRef.current === "FINISH" || inletPointRef.current !== null,
+        getMaxSide: () => stepRef.current === "CONFIRM_PRODUCT" ? 1600 : inletPointRef.current ? 768 : 1600,
         sessionId: update.session.session_id,
         stateVersion: update.session.state_version,
         onUpdate: applyUpdate,
@@ -466,16 +482,110 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     if (roiSelected && (demoMode || inspection?.status === "located") && !session && !starting) void start();
   }, [roiSelected, inspection, session, demoMode]);
 
+  // Follow a Muse-verified target on the phone. The cue and Muse crop use one point.
+  // If local matching fails, hide the cue and ask Muse to find the target again.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !session || !roiSelected || demoMode || session.step === "RECORDED" || session.step === "CONFIRM_PRODUCT" || session.step === "POUR" || session.step === "FINISH") return;
+    let active = true;
+    let busy = false;
+    let reference: TrackingFrame | null = localTrackSeedRef.current;
+    let lastAttempt = 0;
+    let searchIndex = 0;
+    let lastSearchFrame: Uint8Array | null = null;
+    let point = inletPointRef.current;
+    const pauseForAnalysis = (message: string) => {
+      controllerRef.current?.setPaused(true);
+      failurePausedRef.current = true;
+      setFailurePaused(true);
+      setError(message);
+    };
+    const locate = async () => {
+      // A lost target must be found again from a current Muse frame before it can be marked.
+      const firstFrame = grabGray(video, FULL_FRAME, 48);
+      if (!lastSearchFrame || frameDifference(firstFrame, lastSearchFrame) > 8) searchIndex = 0;
+      lastSearchFrame = firstFrame;
+      const searchRoi = INLET_SEARCH_ROIS[searchIndex % INLET_SEARCH_ROIS.length];
+      searchIndex++;
+      const candidate = await api.analyzeInspection(vehicleId, {
+        component: "washer_fluid", photo_type: "engine_candidate", jpeg_base64: grabJpeg(video, searchRoi, 1920, 0.85),
+      });
+      if (!active) return;
+      if (candidate.status === "unavailable") { pauseForAnalysis(candidate.observation); return; }
+      if (!candidate.box || frameDifference(firstFrame, grabGray(video, FULL_FRAME, 48)) > 8) return;
+      const candidateBox = boxInFullFrame(candidate.box, searchRoi);
+      const next = { x: (candidateBox[0] + candidateBox[2]) / 2, y: (candidateBox[1] + candidateBox[3]) / 2 };
+      const crop = roiAround(next.x, next.y, 0.45);
+      const firstImage = grabJpeg(video, crop, 1920, 0.85);
+      const firstTime = video.currentTime;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+      if (!active || video.currentTime <= firstTime || frameDifference(firstFrame, grabGray(video, FULL_FRAME, 48)) > 8) return;
+      const secondImage = grabJpeg(video, crop, 1920, 0.85);
+      const results = await Promise.all([firstImage, secondImage].map((jpeg_base64) => api.analyzeInspection(vehicleId, {
+        component: "washer_fluid", photo_type: "engine", jpeg_base64,
+      })));
+      if (!active || frameDifference(firstFrame, grabGray(video, FULL_FRAME, 48)) > 8) return;
+      const unavailable = results.find((result) => result.status === "unavailable");
+      if (unavailable) { pauseForAnalysis(unavailable.observation); return; }
+      const verified = results.map((result) => result.box ? boxInFullFrame(result.box, crop) : null);
+      if (results.some((result, index) => result.status !== "located" || !verified[index])) return;
+      const [first, second] = verified;
+      if (!first || !second || first[0] >= second[2] || first[2] <= second[0] || first[1] >= second[3] || first[3] <= second[1]) return;
+      const confirmed = { x: (second[0] + second[2]) / 2, y: (second[1] + second[3]) / 2 };
+      if (Math.hypot(confirmed.x - next.x, confirmed.y - next.y) > 0.12) return;
+      point = confirmed;
+      reference = captureTrackingFrame(video);
+      localTrackSeedRef.current = reference;
+      roiRef.current = roiAround(confirmed.x, confirmed.y);
+      updateInletPoint(confirmed);
+    };
+    const tick = async () => {
+      if (!active || busy || document.hidden || session.paused || failurePausedRef.current || video.readyState < 2 || !video.videoWidth) return;
+      try {
+        if (!inletPointRef.current) { point = null; reference = null; }
+        if (!point) {
+          if (performance.now() - lastAttempt < 4000) return;
+          lastAttempt = performance.now();
+          busy = true;
+          try { await locate(); }
+          catch { if (active) pauseForAnalysis("Camera analysis is unavailable. Check your connection and try again."); }
+          return;
+        }
+        const frame = captureTrackingFrame(video);
+        if (!reference) { reference = frame; localTrackSeedRef.current = frame; return; }
+        const tracked = trackPointLocally(reference, frame, point);
+        if (!tracked) {
+          roiRef.current = FULL_FRAME;
+          localTrackSeedRef.current = null;
+          updateInletPoint(null);
+          point = null;
+          reference = null;
+          return;
+        }
+        point = tracked;
+        reference = frame;
+        localTrackSeedRef.current = frame;
+        roiRef.current = roiAround(tracked.x, tracked.y);
+        updateInletPoint(tracked);
+      } catch {
+        if (active) { roiRef.current = FULL_FRAME; localTrackSeedRef.current = null; updateInletPoint(null); point = null; reference = null; }
+      } finally { busy = false; }
+    };
+    const timer = window.setInterval(() => { void tick(); }, 180);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [session?.session_id, session?.step, session?.paused, roiSelected, demoMode, vehicleId]);
+
   const located = inspection?.status === "located" && inspection.box
     ? { x: (inspection.box[0] + inspection.box[2]) / 2, y: (inspection.box[1] + inspection.box[3]) / 2 } : null;
-  const anchor = roiSelected && inletPoint ? inletPoint : located;
+  const anchor = roiSelected ? inletPoint : located;
 
   stepRef.current = session?.step ?? null;
   const current = session ? STEPS[session.step] : null;
   const done = session?.step === "RECORDED";
   const waiting = session?.waiting_reason;
-  const statusLabel = done ? "Task complete" : failurePaused ? "Guide paused" : session?.paused ? "Paused" : waiting === "NEED_VOICE_CONFIRM" ? "Waiting for your confirmation" : waiting === "PRODUCT_UNKNOWN" ? "Waiting for a readable label" : waiting === "PRODUCT_CONFLICT" ? (bottleChanged ? "Different bottle" : "Not washer fluid") : waiting ? "Waiting for a clear view" : observationStatus ?? (session ? (session.step === "OPEN_CAP" ? "Watching the cap" : "Watching automatically") : "Camera ready");
-  const instruction = bottleChanged && waiting === "PRODUCT_CONFLICT" ? "That's a different bottle. Show its label." : waiting ? WAIT_MESSAGE[waiting] : current?.instruction ?? "Mount your phone with the washer fluid inlet in view";
+  const locatingAgain = !!session && !inletPoint && (session.step === "FIND_INLET" || session.step === "OPEN_CAP") && !demoMode;
+  const statusLabel = done ? "Task complete" : failurePaused ? "Guide paused" : session?.paused ? "Paused" : locatingAgain ? "Finding the washer inlet" : waiting === "NEED_VOICE_CONFIRM" ? "Waiting for your confirmation" : waiting === "PRODUCT_UNKNOWN" ? "Waiting for a readable label" : waiting === "PRODUCT_CONFLICT" ? (bottleChanged ? "Different bottle" : "Not washer fluid") : waiting ? "Waiting for a clear view" : observationStatus ?? (session ? (session.step === "OPEN_CAP" ? "Watching the cap" : "Watching automatically") : "Camera ready");
+  const instruction = locatingAgain ? "Hold the engine bay steady while I find the washer inlet." : bottleChanged && waiting === "PRODUCT_CONFLICT" ? "That's a different bottle. Show its label." : waiting ? WAIT_MESSAGE[waiting] : current?.instruction ?? "Mount your phone with the washer fluid inlet in view";
 
   const visionBlocked = visionStatus === "billing_required" || visionStatus === "unauthorized";
 
@@ -571,7 +681,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           </div>
           <h1>{instruction}</h1>
           {session.paused ? <button type="button" className="arw-primary is-wide" onClick={() => void sendIntent(session.session_id, "RESUME", "touch")} disabled={commandPending}>Resume guide</button>
-          : failurePaused ? <button type="button" className="arw-secondary is-wide" onClick={() => { setError(null); failurePausedRef.current = false; setFailurePaused(false); controllerRef.current?.setPaused(false); }}>Try again</button>
+          : failurePaused ? <button type="button" className="arw-secondary is-wide" onClick={() => { setError(null); if (!demoMode) { roiRef.current = FULL_FRAME; localTrackSeedRef.current = null; updateInletPoint(null); } failurePausedRef.current = false; setFailurePaused(false); controllerRef.current?.setPaused(false); }}>Try again</button>
           : waiting === "NEED_VOICE_CONFIRM" ? <div className="arw-actions">
             <button type="button" className="arw-secondary" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button>
             <button type="button" className="arw-primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, refilled</button>
