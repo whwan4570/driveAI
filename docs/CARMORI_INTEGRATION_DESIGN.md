@@ -4,11 +4,13 @@
 대상: `/Users/joon/Downloads/driveAI`. 기존 React/FastAPI 구조를 확장한다.
 목표 일정: 3명, 2026-11-04 14:00. 일정은 America/Los_Angeles 기준으로 가정한다.
 
+2026-11-03 현황 참고: 아래의 "C 구현 현황 — 2026-10-28"은 당시 기록이다. 이후 팀이 제공한 SAM 3D 기반 `web/public/models/demo.glb`가 2014 Sonata의 Status 화면에 연결됐다. 이 저장소의 GPU 스크립트로 해당 파일을 생성한 이력과 자동 차량별 생성 파이프라인은 아직 없다.
+
 ## C 구현 현황 — 2026-10-28
 
 - MediaPipe Hand Landmarker 1.2.0을 브라우저 모듈 Worker에서 로컬 WASM/모델로 실행한다. 손 관절을 카메라 위에 표시하고, 선택한 투입구 영역을 손이 떠나면 새 서버 관찰을 요청한다. 손 위치만으로 단계는 전환하지 않는다. 빈 이미지 브라우저 추론으로 로더 동작을 확인했으며 실제 차량 작업 영상 검증은 남았다.
 - Status는 차량별 GLB URL을 받을 수 있고, 30 MB 이하의 기본 glTF 2.0 구조를 검사해 저장하는 API가 있다. 차량 식별 정보가 바뀌면 자산 연결을 해제한다. 검증 전 공통 세단은 `Illustrative 3D sedan`으로 표시한다.
-- `services/sam3d/generate_splat.py`는 공식 SAM 3D Objects 추론 API를 호출해 생성 차량 이미지와 알파 마스크에서 Gaussian-splat PLY를 만드는 GPU 단계이다. **GPU/체크포인트가 없어 아직 실행 검증하지 못했다.** PLY를 GLB로 변환·검수하는 단계와 자동 job queue는 남았다. 따라서 현재 Status의 3D 차량은 SAM 3D 생성물이 아니다.
+- `services/sam3d/generate_splat.py`는 공식 SAM 3D Objects 추론 API를 호출해 생성 차량 이미지와 알파 마스크에서 Gaussian-splat PLY를 만드는 GPU 단계이다. **2026-10-28 당시 이 스크립트는 GPU/체크포인트가 없어 실행 검증하지 못했다.** PLY를 GLB로 변환·검수하는 단계와 자동 job queue는 남았다. 이후 Status의 데모 Sonata에는 팀이 별도로 제공한 SAM 3D 기반 GLB를 연결했다.
 - SAM 3.1 영상 세그먼트 API는 A 단계에 있지만, 그 결과를 실시간 카메라 마스크 오버레이로 연결하는 작업은 남았다. 현재 C 오버레이는 손 관절이다.
 
 ## 1. 사용자에게 제공할 결과

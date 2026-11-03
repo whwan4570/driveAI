@@ -15,7 +15,7 @@ Owners often have to identify an unfamiliar part, read instructions, handle a bo
 | Rubric | Evidence in this prototype | Where to look |
 | --- | --- | --- |
 | **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo sequence](#run-of-show), [supported car and sources](#supported-car-and-data-sources) |
-| **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. SAM 3.1 can segment a short uploaded clip, but it is not the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [API](#api) |
+| **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Status shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical Depth & Execution (20%)** | A deterministic state machine requires two disjoint observations, rejects stale responses and incompatible products, and records whether completion was observed or user-confirmed. | [Decision rules](#how-the-hands-free-refill-decides), [replay tests](#tests) |
 | **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting History entry. | [Three-minute run of show](#run-of-show) |
 
@@ -46,7 +46,7 @@ We chose **one complete, hands-free care journey** on a **2014 Hyundai Sonata** 
 
 **Brief → Ask → Inspect → Refill → Remember**
 
-Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. We designed the paths for streaming SAM, SAM 3D vehicle generation and native spatial AR, then deliberately kept them outside this three-minute prototype so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
+Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. Status displays a **team-supplied SAM 3D result for the 2014 Sonata**. We deliberately deferred streaming SAM, automatic SAM 3D generation for arbitrary vehicles, and native spatial AR so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
 
 ---
 
@@ -58,7 +58,7 @@ Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses
 | **Ask** | Answers from stored facts only. If the model cannot point to a fact, Carmori does not read the answer out. |
 | **Washer refill** (Home or Guide) | A full-screen camera guide: find the inlet, lift the cap, show the bottle, pour, close. Cards and cues appear inside the camera view. |
 | **Guide → Tire check** | An 8-shot visual check (sidewall and tread on each wheel). It rejects blurry, dark or wrong-angle shots. It does not measure tread depth or pressure. |
-| **Status** | Mileage, care status per part and a 3D view of the car. |
+| **Status** | Mileage, care status per part and a 3D view of the car. The demo Sonata uses the team's SAM 3D-derived GLB; other vehicles use their own supplied model or a generic fallback. |
 | **Places** | Nearby washer-fluid shops and car washes, the parked-car spot and a Find my car compass view. |
 | **History / Documents** | User-confirmed maintenance records with photos, plus vehicle documents. |
 | **In the car** | In the iOS and Android shells, the briefing can start when CarPlay or Android Auto connects. |
@@ -142,16 +142,16 @@ We **deliberately deferred these integrations** for the three-minute prototype. 
 | Capability | Already in the repository | Integration path we designed | Why it is outside this demo |
 | --- | --- | --- | --- |
 | **Streaming SAM 3.1 tracking** | A [short-MP4 SAM endpoint](backend/carmori/sam_video.py) returns masks and request-scoped track IDs; the live guide uses [local image matching](web/src/lib/localVisualTracking.ts) to move its cue and Muse crop together. | Seed SAM from a Muse-verified frame, stream subsequent frames to a persistent tracker, align each result to its capture time, and hide/reseed the cue when the target is lost. | The uploaded-clip endpoint cannot supply low-latency, frame-aligned live positions. We have not deployed or measured a streaming tracker on a phone-to-GPU connection. |
-| **SAM 3D vehicle asset** | A [GPU-stage script](services/sam3d/generate_splat.py) is prepared to produce a splat PLY from a vehicle cutout; Status can accept a validated GLB. | Run SAM 3D Objects on a separate Linux/NVIDIA worker, inspect the output, create a real textured GLB, store it, then attach it to the vehicle. | The checkpoint/GPU run and PLY-to-GLB asset path have not been validated. That pipeline adds cost and waiting time but does not improve the washer-cap decision. |
+| **Automatic SAM 3D generation** | The team supplied a SAM 3D-derived [`demo.glb`](web/public/models/demo.glb), which [Status loads for the 2014 Sonata](web/src/components/StatusVehicle3D.tsx). A separate [GPU-stage script](services/sam3d/generate_splat.py) prepares a splat PLY from a vehicle cutout. | For each new vehicle, run SAM 3D Objects on a Linux/NVIDIA worker, inspect and convert its output into a viewer-ready GLB, then store and attach it to that vehicle. | The bundled Sonata asset is shown now; the automatic per-vehicle GPU job, conversion and publishing pipeline have not been validated. Those steps add cost and waiting time without improving the washer-cap decision. |
 | **World-anchored AR** | [iOS and Android shells](web/) exist; the current guide is a 2D camera overlay that follows local image matching. | Use native ARKit/ARCore camera pose and anchors with a verified component location, then test alignment across motion, occlusion and different cars. | A 3D vehicle model does not by itself locate a physical cap. Native anchoring and real-car calibration would expand the demo beyond its tested workflow. |
 
-The proposed deployment separates the web/API service from the GPU worker; the existing Capacitor shells provide a path to native iOS/Android delivery. The detailed service boundaries, data flow and validation gates are in [the original integration design (a proposal, not a current-status report)](docs/CARMORI_INTEGRATION_DESIGN.md) and [the SAM 3D stage notes](services/sam3d/README.md). The current Status car is **not** a SAM 3D output, and the refill arrow is **not** a SAM mask or world anchor. These paths are planned for an expanded product; they are not counted as working features in the judging evidence above.
+The proposed deployment separates the web/API service from the GPU worker; the existing Capacitor shells provide a path to native iOS/Android delivery. The detailed service boundaries, data flow and validation gates are in [the original integration design (a proposal, not a current-status report)](docs/CARMORI_INTEGRATION_DESIGN.md) and [the SAM 3D stage notes](services/sam3d/README.md). The Sonata asset was supplied as a SAM 3D result and is displayed in Status; the repository does not contain its source image, generation manifest or checkpoint, so its creation cannot be reproduced from this repository alone. The refill arrow is **not** a SAM mask or world anchor. Only the bundled Sonata display is counted as working here, not automatic SAM 3D generation for every registered car.
 
 ### Next engineering milestones
 
 1. **Real-car validation:** Measure recognition accuracy, latency, false transitions, and performance under varying light, occlusion, and camera angle.
 2. **Streaming tracking:** Connect a persistent SAM 3.1 service only after measuring end-to-end frame latency against on-device matching and testing target loss/reseed.
-3. **3D assets and spatial AR:** Validate the SAM 3D GPU output and GLB conversion for vehicle display; separately test ARKit/ARCore anchors against the real car. A generated vehicle asset is not a physical component anchor.
+3. **3D assets and spatial AR:** Make the team-supplied Sonata asset reproducible through a GPU job and reviewed GLB export for new cars; separately test ARKit/ARCore anchors against the real car. A generated vehicle asset is not a physical component anchor.
 4. **More vehicles and tasks:** Add vehicle-specific manuals, workflows, and validated safety checks beyond the initial Sonata refill.
 5. **Deeper ownership memory:** Link maintenance, documents, trip context, personalized care, and the proactive companion into one continuous experience.
 
@@ -302,6 +302,6 @@ docs/              design notes and the real-clip test set
 - Photo checks (inlet, label, tire) take several seconds each. Live step checks depend on network and model speed.
 - Carmori does not measure fluid level, amount poured, tread depth or tire pressure. It shows what is visible and saves gauge readings you enter.
 - The inlet cue follows local image matching while the target remains visible. Fast camera movement, occlusion and a changed cap appearance can force a new Muse search. The [streaming SAM and spatial AR plan](#deliberately-deferred-streaming-sam-and-spatial-ar) is intentionally outside this demo.
-- SAM 3.1 track IDs last only for one uploaded clip request. The prepared SAM 3D stage has not produced a validated GLB for Status; the [deployment and asset steps](#deliberately-deferred-streaming-sam-and-spatial-ar) are documented separately.
+- SAM 3.1 track IDs last only for one uploaded clip request. The Sonata's bundled SAM 3D-derived GLB displays in Status, but the [automatic generation and publishing path](#deliberately-deferred-streaming-sam-and-spatial-ar) has not been run end to end in this repository.
 - Without a working Meta key (billing or model access), photo checks, automatic steps and transcription are unavailable. The app says so and never records a step it didn't see. Manual records still work.
 - This is a local prototype with no accounts. The browser remembers the car ID in `localStorage`. Add sign-in and ownership checks before any public deployment.
