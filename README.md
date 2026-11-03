@@ -2,6 +2,13 @@
 
 **A hands-free car-care guide that sees the task, helps you finish it, and remembers what happened.**
 
+<p align="center">
+  <a href="docs/media/carmori-promo.mp4"><img src="docs/media/carmori-promo-poster.jpg" width="240" alt="Carmori promo film: Know your car" /></a><br />
+  <a href="docs/media/carmori-promo.mp4"><b>▶ Watch the 30-second promo</b></a>
+</p>
+
+*Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo sequence](#demo-3-minutes).*
+
 Washer-fluid refills are a routine task across vehicle makes, yet finding the right cap and checking the product while both hands are busy can still be awkward. Carmori starts with that complete task on a 2014 Hyundai Sonata. Its vehicle-specific manual, camera observation, step rules and saved record provide a structure to adapt to other cars after validating each model's instructions and recognition.
 
 **Hackathon demo:** On a 2014 Hyundai Sonata, Carmori finds the washer-fluid cap in the camera view, checks two independent observations before advancing each step, answers spoken questions in the current task context, and saves how the refill was confirmed. The defining moment is opening the cap with both hands while the guide advances without a screen tap.
