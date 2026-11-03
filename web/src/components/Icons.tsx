@@ -2,7 +2,7 @@ import type { ReactNode, SVGProps } from "react";
 
 export type IconName =
   | "car" | "home" | "status" | "assistant" | "inspect" | "history" | "washer"
-  | "activity" | "scan" | "folder" | "fuel" | "wrench" | "bag" | "book" | "files" | "list" | "droplets" | "tire" | "filter" | "layers" | "wind" | "droplet" | "vent" | "zap" | "thermometer"
+  | "activity" | "scan" | "folder" | "fuel" | "wrench" | "bag" | "book" | "files" | "list" | "droplets" | "tire" | "filter" | "layers" | "wind" | "droplet" | "vent" | "zap" | "thermometer" | "controls" | "info"
   | "calendar" | "cloud" | "mic" | "play" | "pause" | "close" | "plus"
   | "arrow" | "check" | "camera" | "volume" | "spark" | "eye"
   | "refresh" | "bell" | "shield" | "chevron" | "file" | "menu" | "profile" | "settings" | "pin" | "navigation";
@@ -10,6 +10,8 @@ export type IconName =
 export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number }) {
   const shared = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const, ...props };
   const paths: Record<IconName, ReactNode> = {
+    info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></>,
+    controls: <><path d="M9 6h12M3 6h2M3 18h12m4 0h2"/><circle cx="7" cy="6" r="2"/><circle cx="17" cy="18" r="2"/></>,
     activity: <path d="M2 12h4l3-9 5 18 3-9h5"/>,
     scan: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3M7 12h10"/></>,
     folder: <path d="M3 9V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v2M3 9h18l-3 11H3a1 1 0 0 1-1-1V9Z"/>,

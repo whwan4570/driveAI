@@ -117,12 +117,9 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const [guideSetupOpen, setGuideSetupOpen] = useState(false);
   const [briefingText, setBriefingText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuMounted, setMenuMounted] = useState(false);
-  const [menuView, setMenuView] = useState<"menu" | "my-profile" | "settings">("menu");
+  const [menuView, setMenuView] = useState<"menu" | "about" | "settings">("menu");
   const menuPanelRef = useRef<HTMLElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuCloseTimerRef = useRef<number | null>(null);
-  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [recordOpen, setRecordOpen] = useState(false);
   const [tireOpen, setTireOpen] = useState(false);
   const [recordComponent, setRecordComponent] = useState<"washer_fluid" | "tires">("washer_fluid");
@@ -302,39 +299,18 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
 
   useEffect(() => {
     if (!menuOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    menuPanelRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeMenu();
-        return;
-      }
-      if (event.key !== "Tab" || !menuPanelRef.current) return;
-      const buttons = [...menuPanelRef.current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-      if (!buttons.length) return;
-      const first = buttons[0];
-      const last = buttons[buttons.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
+    menuPanelRef.current?.querySelector<HTMLElement>("h1")?.focus();
+    document.documentElement.scrollTop = 0;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeMenu(); };
     document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-    };
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [menuOpen, menuView]);
 
-  useEffect(() => () => {
-    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
-  }, []);
-
   const openMenu = () => {
-    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
     setNotificationsOpen(false);
+    setProfileOpen(false);
     setMenuView("menu");
-    setMenuMounted(true);
-    requestAnimationFrame(() => requestAnimationFrame(() => setMenuOpen(true)));
+    setMenuOpen(true);
   };
 
   useEffect(() => {
@@ -369,12 +345,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
 
   const closeMenu = () => {
     setMenuOpen(false);
-    if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
-    menuCloseTimerRef.current = window.setTimeout(() => {
-      setMenuMounted(false);
-      setMenuView("menu");
-      menuCloseTimerRef.current = null;
-    }, 240);
+    setMenuView("menu");
     menuButtonRef.current?.focus();
   };
 
@@ -391,7 +362,6 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     setProfileOpen(false);
     setNotificationsOpen(false);
     setMenuOpen(false);
-    setMenuMounted(false);
     setMenuView("menu");
     setTab(next);
     if (next === "status") setDriveSummary(metricsRef.current!.summary());
@@ -771,6 +741,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
         <p className="notifications-footnote">Live dashboard alerts are not connected.</p>
       </section>}
 
+      <div className="page-content" hidden={menuOpen}>
       {profileOpen && vehicle && <VehicleEditor vehicle={vehicle} hasMajorIssues={majorIssues.length > 0} onSaved={(updated) => { setVehicle(updated); closeVehicleEditor(); void refreshData(); }} onCancel={closeVehicleEditor} backLabel={profileOriginRef.current === "menu" ? "Menu" : profileOriginRef.current === "history" ? "Glove box" : "Home"}/>}
 
       {!profileOpen && tab === "home" && <div className="k-home home-overview">
@@ -873,22 +844,21 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
       {!profileOpen && tab === "documents" && <Documents key={`${vehicleId}:${documentKind ?? "all"}`} initialKind={documentKind} vehicleId={vehicleId} records={documents.filter((record) => record.vehicleId === vehicleId)} storageError={documentsError} onChanged={refreshDocuments} onBack={() => goToTab(documentReturnTabRef.current)}/>}
 
       {error && tab !== "documents" && <div className="inline-error" role="alert">{error}</div>}
-    </main>
-    <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id || (tab === "documents" && item.id === "history") ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
-    {placePrompt && <div className="place-prompt-backdrop" role="presentation"><section className="place-prompt" role="dialog" aria-modal="true" aria-labelledby="place-prompt-title"><span className="place-prompt-kicker">{placePrompt.kind === "parking" ? "Parked car" : placePrompt.name}</span><h2 id="place-prompt-title">{placePrompt.kind === "parking" ? "Remember this parking spot?" : placePrompt.category === "fuel" ? "Did you refuel?" : placePrompt.category === "repair" ? "Did you get service?" : "Did you wash your car?"}</h2><p>{placePrompt.kind === "parking" ? "Car connection ended after a drive. Save your last phone location in Places?" : "You stopped near this place. Save a visit only if it happened."}</p><div className="place-prompt-actions"><button type="button" onClick={dismissPlacePrompt}>Not now</button><button type="button" onClick={() => { if (placePrompt.kind === "parking") { try { saveParkingSpot(vehicleId, placePrompt.fix); } catch { setError("Could not save this parking spot on this device."); } } else { try { savePlaceVisit(vehicleId, placePrompt); setPlaceVisits(readPlaceVisits(vehicleId)); } catch { setError("Could not save this visit on this device."); } } dismissPlacePrompt(); }}>{placePrompt.kind === "parking" ? "Save spot" : "Yes, save"}</button></div></section></div>}
-    {menuMounted && <>
-      <div className={`side-menu-backdrop${menuOpen ? " is-open" : ""}`} onClick={closeMenu} aria-hidden="true"/>
-      <aside ref={menuPanelRef} className={`side-menu${menuOpen ? " is-open" : ""}`} id="carmori-side-menu" role="dialog" aria-modal="true" aria-hidden={!menuOpen} aria-label={menuView === "menu" ? "Menu" : menuView === "my-profile" ? "My profile" : "Settings"} onTouchStart={(event) => { const touch = event.touches[0]; menuTouchRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null; }} onTouchEnd={(event) => { const start = menuTouchRef.current; const touch = event.changedTouches[0]; if (start && touch && touch.clientX - start.x > 70 && Math.abs(touch.clientX - start.x) > Math.abs(touch.clientY - start.y) * 1.5) closeMenu(); menuTouchRef.current = null; }} onTouchCancel={() => { menuTouchRef.current = null; }}>
-        <div className="side-menu-header"><span>{menuView === "menu" ? "Carmori" : menuView === "my-profile" ? "My profile" : "Settings"}</span><button type="button" onClick={closeMenu} aria-label="Close menu"><Icon name="close" size={20}/></button></div>
+      </div>
+      {menuOpen && <section ref={menuPanelRef} className="menu-page k-home" id="carmori-side-menu" aria-label={menuView === "menu" ? "Menu" : menuView === "about" ? "About Carmori" : "Settings"}>
+        {menuView !== "menu" && <button className="context-back" type="button" onClick={() => setMenuView("menu")}>‹ Menu</button>}
+        <header className="menu-page-heading"><div><p className="k-eyebrow">CARMORI</p><h1 className="k-title" tabIndex={-1}>{menuView === "menu" ? "Menu" : menuView === "about" ? "About Carmori" : "Settings"}</h1></div><button className="menu-page-close" type="button" onClick={closeMenu} aria-label="Close menu"><Icon name="close" size={18}/></button></header>
         {menuView === "menu" ? <>
-          <button className="side-menu-identity" type="button" onClick={() => setMenuView("my-profile")}><span className="side-menu-avatar"><Icon name="profile" size={25}/></span><span><strong>My profile</strong><small>On this device</small></span></button>
-          <nav className="side-menu-links" aria-label="Profile menu">
-            <button type="button" onClick={() => openVehicleEditor("menu")}><Icon name="car" size={22}/><span>My vehicle</span><Icon name="chevron" size={17}/></button>
-          </nav>
-          <div className="side-menu-footer"><button type="button" onClick={() => setMenuView("settings")}><Icon name="settings" size={22}/><span>Settings</span><Icon name="chevron" size={17}/></button></div>
-        </> : <>
-          <button className="side-menu-back" type="button" onClick={() => setMenuView("menu")}>‹ Menu</button>
-          {menuView === "my-profile" ? <p className="side-menu-note">Personal profile is not set up in this prototype.</p> : <div className="side-menu-settings settings-list">
+          <p className="k-lead">Your car, preferences and app controls.</p>
+          <section className="k-block is-list" aria-label="Vehicle and preferences">
+            <button className="k-row" type="button" onClick={() => openVehicleEditor("menu")}><span className="k-row-art"><Icon name="car" size={18}/></span><span className="k-row-main"><strong>My vehicle</strong><small>{vehicleName(vehicle)}{vehicle?.trim ? ` · ${vehicle.trim}` : ""}</small></span><Icon className="k-row-trail" name="chevron" size={16}/></button>
+            <button className="k-row" type="button" onClick={() => setMenuView("settings")}><span className="k-row-art"><Icon name="controls" size={18}/></span><span className="k-row-main"><strong>Settings</strong><small>Location, voice, camera and preferences</small></span><Icon className="k-row-trail" name="chevron" size={16}/></button>
+          </section>
+          <section className="k-block is-list" aria-label="Records and app information">
+            <button className="k-row" type="button" onClick={() => goToTab("history")}><span className="k-row-art"><Icon name="folder" size={18}/></span><span className="k-row-main"><strong>Glove box</strong><small>Documents and maintenance history</small></span><Icon className="k-row-trail" name="chevron" size={16}/></button>
+            <button className="k-row" type="button" onClick={() => setMenuView("about")}><span className="k-row-art"><Icon name="info" size={18}/></span><span className="k-row-main"><strong>About Carmori</strong><small>App information and privacy</small></span><Icon className="k-row-trail" name="chevron" size={16}/></button>
+          </section>
+        </> : menuView === "about" ? <section className="k-block about-carmori"><h2>Care for your car, one step at a time.</h2><p>Carmori brings together your vehicle records, maintenance prompts and guided checks.</p><h2>Your data</h2><p>Documents and saved places stay in this browser. Vehicle details and confirmed maintenance records are saved by the Carmori service.</p><p>When you use camera or voice features, images or audio may be sent to the configured AI service. Location-based place prompts use OpenStreetMap when enabled in Settings.</p><h2>Guidance and records</h2><p>Missing records do not indicate a fault. Service estimates are schedule prompts, not measurements of component condition. Confirm completed work before saving it.</p></section> : <div className="side-menu-settings settings-list">
               <details className="settings-disclosure" open><summary><strong>Location & driving</strong><small>Location, trips and automatic actions</small></summary>
               <div className="settings-row"><span><strong>Location</strong><small>{permissionStatusText(perms.location, permStates.location)}</small></span><button type="button" role="switch" className="k-switch" aria-checked={permissionOn("location")} aria-label="Location access" disabled={false} onClick={() => void setPermission("location", !permissionOn("location"))}/></div>
               <div className="settings-row"><span><strong>Drive tracking</strong><small>{perms.location ? trackingMessage : "Needs location"}</small></span><button type="button" role="switch" className="k-switch" aria-checked={trackingEnabled} aria-label="Drive tracking" disabled={!perms.location} onClick={toggleStatusTracking}/></div>
@@ -906,8 +876,9 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
               </details><details className="settings-disclosure"><summary><strong>Display & preview</strong><small>Sample indicators</small></summary>
               <div className="settings-row"><span><strong>Sample data preview</strong><small>{"Shows sample indicators. Records stay unchanged."}</small></span><button type="button" role="switch" className="k-switch" aria-checked={samplePreview} aria-label="Sample data preview" disabled={false} onClick={() => setPreview(!samplePreview)}/></div>
           </details></div>}
-        </>}
-      </aside>
-    </>}
+      </section>}
+    </main>
+    <nav className="bottom-nav" aria-label="Main navigation"><div className="bottom-nav-inner">{tabs.map((item) => <button type="button" key={item.id} className={tab === item.id || (tab === "documents" && item.id === "history") ? "active" : ""} onClick={() => goToTab(item.id)} disabled={busy}><Icon name={item.icon} size={23}/><span>{item.label}</span></button>)}</div></nav>
+    {placePrompt && <div className="place-prompt-backdrop" role="presentation"><section className="place-prompt" role="dialog" aria-modal="true" aria-labelledby="place-prompt-title"><span className="place-prompt-kicker">{placePrompt.kind === "parking" ? "Parked car" : placePrompt.name}</span><h2 id="place-prompt-title">{placePrompt.kind === "parking" ? "Remember this parking spot?" : placePrompt.category === "fuel" ? "Did you refuel?" : placePrompt.category === "repair" ? "Did you get service?" : "Did you wash your car?"}</h2><p>{placePrompt.kind === "parking" ? "Car connection ended after a drive. Save your last phone location in Places?" : "You stopped near this place. Save a visit only if it happened."}</p><div className="place-prompt-actions"><button type="button" onClick={dismissPlacePrompt}>Not now</button><button type="button" onClick={() => { if (placePrompt.kind === "parking") { try { saveParkingSpot(vehicleId, placePrompt.fix); } catch { setError("Could not save this parking spot on this device."); } } else { try { savePlaceVisit(vehicleId, placePrompt); setPlaceVisits(readPlaceVisits(vehicleId)); } catch { setError("Could not save this visit on this device."); } } dismissPlacePrompt(); }}>{placePrompt.kind === "parking" ? "Save spot" : "Yes, save"}</button></div></section></div>}
   </div>;
 }
