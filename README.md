@@ -2,6 +2,8 @@
 
 **A hands-free car-care guide that sees the task, helps you finish it, and remembers what happened.**
 
+Washer-fluid refills are a routine task across vehicle makes, yet finding the right cap and checking the product while both hands are busy can still be awkward. Carmori starts with that complete task on a 2014 Hyundai Sonata. Its vehicle-specific manual, camera observation, step rules and saved record provide a structure to adapt to other cars after validating each model's instructions and recognition.
+
 **Hackathon demo:** On a 2014 Hyundai Sonata, Carmori finds the washer-fluid cap in the camera view, checks two independent observations before advancing each step, answers spoken questions in the current task context, and saves how the refill was confirmed. The defining moment is opening the cap with both hands while the guide advances without a screen tap.
 
 **[Demo sequence](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
@@ -9,6 +11,8 @@
 ### Why this matters
 
 Owners often have to identify an unfamiliar part, read instructions, handle a bottle, and record the work at the same time. A phone guide that watches the task can keep their hands free and avoid claiming a step was completed when the view is unclear. The first audience is owners doing simple, low-risk care themselves; broader maintenance tasks require vehicle-specific validation.
+
+We conceived Carmori as a hands-free product that could become especially useful on camera-equipped devices such as Meta smart glasses: the owner could keep looking at the car and use both hands while receiving guidance. This prototype runs on a phone; smart-glasses integration and its usability have not been tested.
 
 ### What judges can verify
 
@@ -263,6 +267,16 @@ cd backend
 ```
 
 `carmori-replay` runs the state machine over 16 scripted clips: a normal refill, flicker, a blocked view, a wrong bottle, a bottle swap, an empty-bottle pour, late and out-of-order answers, and voice trying to approve a product. It fails on any wrong record. CI runs both, plus `pnpm build`.
+
+### D7 verification snapshot · 2026-11-03
+
+| Check | Result | What it proves |
+| --- | --- | --- |
+| Backend tests | **177 passed, 1 skipped** | The current automated backend suite passes. |
+| Scripted workflow replay | **16/16 clips passed; 0 wrong automatic records** | The state machine handles the scripted normal and failure cases. This is not a real-car success rate. |
+| Real-car, uninterrupted phone runs | **Not scored yet** | Attempt count, no-tap completion rate, false transitions and first correct cap-cue time still need a measured run. |
+
+**Submission wording template — example numbers only, not D7 findings:** “In **5** real-car attempts, **4/5** reached a saved record without a screen tap, with **0** false transitions; the median time to the first correct cap cue was **8.0 s**.” Replace all four example values with measured results from uninterrupted phone runs tonight before using this sentence in a submission. Keep failed attempts in the denominator and time the cue from opening the guide, not from the first model response.
 
 **Real-clip test set:** [docs/REAL_CLIP_TEST_SET.md](docs/REAL_CLIP_TEST_SET.md) lists 12 cases (14 planned clips), including normal completion, occlusion, a coffee cup, a wrong fluid, a hidden label and an unseen pour. `python -m carmori.annotate --case <id>` asks the model once per frame window and saves the answers. `carmori-replay --report` then writes a results table, and rule changes can be re-checked with no API cost. The scripted fixtures above are **not** a measured real-car success rate. Before submission, report actual attempts, no-tap completions, false transitions and time to the first correct cap cue; do not infer these numbers from unit tests.
 
