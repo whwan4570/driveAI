@@ -4,9 +4,10 @@
 캐시한다. 이후 규칙 조정은 replay.py로 API 비용 없이 반복한다.
 
     ffmpeg -i recordings/normal_01.mp4 -vf fps=2 fixtures/frames/normal_01/%05d.jpg
-    python -m carmori.annotate ../fixtures/frames/normal_01 --name normal_01 \
-        --roi 0.55,0.40 --final-step RECORDED --completion-source observed_sequence \
+    python -m carmori.annotate ../fixtures/frames/normal_01 --case normal --take 1 --max-side 1280 \
         --out ../fixtures/clips/recorded/normal_01.json
+
+촬영 목록과 정답은 clip_cases.py, 전체 절차는 docs/REAL_CLIP_TEST_SET.md를 본다.
 
 프레임은 라이브와 같게 ROI(--roi 탭 위치, 기본 크기 0.5)를 자르고 긴 변 768px,
 JPEG 품질 70으로 다시 인코딩해 보낸다. 라이브가 보내는 직전 단계 참고 프레임은
@@ -29,6 +30,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from PIL import Image
 
+from .clip_cases import CASES_BY_ID, clip_name
 from .config import Settings
 from .models import CompletionSource, Step, WaitReason
 from .spark import SparkClient, make_spark_client
@@ -64,7 +66,7 @@ def prepare_frame(data: bytes, roi: Roi = FULL_FRAME, *, max_side: int = MAX_SID
 
 
 async def annotate(
-    frames_dir: Path, *, spark: SparkClient, fps: float, window: int, stride: int, roi: Roi = FULL_FRAME
+    frames_dir: Path, *, spark: SparkClient, fps: float, window: int, stride: int, roi: Roi = FULL_FRAME, max_side: int = MAX_SIDE
 ) -> list[dict]:
     paths = sorted(frames_dir.glob("*.jpg"))
     events: list[dict] = []
@@ -72,7 +74,7 @@ async def annotate(
     # 묶음끼리 프레임이 겹치지 않도록 stride >= window를 권장한다.
     for start in range(0, len(paths) - window + 1, stride):
         chunk = paths[start : start + window]
-        answer = await spark.analyze([prepare_frame(p.read_bytes(), roi) for p in chunk], step=None)
+        answer = await spark.analyze([prepare_frame(p.read_bytes(), roi, max_side=max_side) for p in chunk], step=None)
         seq += 1
         events.append(
             {
@@ -98,19 +100,32 @@ def _point(text: str) -> tuple[float, float]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("frames_dir", type=Path)
-    parser.add_argument("--name", required=True)
+    parser.add_argument("--case", choices=sorted(CASES_BY_ID), default=None, help="fills the name, description and expected result from clip_cases.py")
+    parser.add_argument("--take", type=int, default=1)
+    parser.add_argument("--name", default=None)
     parser.add_argument("--description", default="")
     parser.add_argument("--fps", type=float, default=2.0)
     parser.add_argument("--window", type=int, default=2)
     parser.add_argument("--stride", type=int, default=2)
     parser.add_argument("--roi", type=_point, default=None, help="tapped inlet point X,Y as fractions of the frame")
     parser.add_argument("--roi-size", type=float, default=0.5)
-    parser.add_argument("--final-step", type=Step, required=True)
+    parser.add_argument("--max-side", type=int, default=MAX_SIDE, help="longest frame side sent to the model")
+    parser.add_argument("--final-step", type=Step, default=None)
     parser.add_argument("--completion-source", type=CompletionSource, default=None)
     parser.add_argument("--waiting-reason", type=WaitReason, default=None)
     parser.add_argument("--env-file", type=Path, default=REPO_ENV)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+
+    case = CASES_BY_ID.get(args.case) if args.case else None
+    final_step = args.final_step or (case.final_step if case else None)
+    if final_step is None:
+        parser.error("--final-step or --case is required")
+    name = args.name or (clip_name(case.id, args.take) if case else None)
+    if name is None:
+        parser.error("--name or --case is required")
+    completion_source = args.completion_source or (case.completion_source if case else None)
+    waiting_reason = args.waiting_reason or (case.waiting_reason if case else None)
 
     if args.env_file.is_file():
         load_dotenv(args.env_file, override=False)
@@ -120,13 +135,14 @@ def main(argv: list[str] | None = None) -> None:
     roi = roi_around(*args.roi, size=args.roi_size) if args.roi else FULL_FRAME
 
     events = asyncio.run(annotate(
-        args.frames_dir, spark=make_spark_client(settings), fps=args.fps, window=args.window, stride=args.stride, roi=roi,
+        args.frames_dir, spark=make_spark_client(settings), fps=args.fps, window=args.window, stride=args.stride, roi=roi, max_side=args.max_side,
     ))
     clip = {
-        "name": args.name,
-        "description": args.description,
+        "name": name,
+        "description": args.description or (case.checks if case else ""),
         "source": "recorded",
         "annotation": {
+            "case": case.id if case else None,
             "spark_mode": settings.spark_mode,
             "model": settings.spark_vision_model,
             "reasoning_effort": settings.spark_reasoning_effort or None,
@@ -134,13 +150,13 @@ def main(argv: list[str] | None = None) -> None:
             "window": args.window,
             "stride": args.stride,
             "roi": [round(v, 4) for v in roi],
-            "max_side": MAX_SIDE,
+            "max_side": args.max_side,
             "annotated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },
         "expect": {
-            "final_step": args.final_step.value,
-            "completion_source": args.completion_source.value if args.completion_source else None,
-            "waiting_reason": args.waiting_reason.value if args.waiting_reason else None,
+            "final_step": final_step.value,
+            "completion_source": completion_source.value if completion_source else None,
+            "waiting_reason": waiting_reason.value if waiting_reason else None,
         },
         "events": events,
     }

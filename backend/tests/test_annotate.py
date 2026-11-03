@@ -63,3 +63,24 @@ def test_cli_writes_expectation_and_annotation(tmp_path, isolated_env):
 def test_cli_rejects_point_outside_frame(tmp_path, isolated_env):
     with pytest.raises(SystemExit):
         main([str(tmp_path), "--name", "x", "--roi", "1.2,0.5", "--final-step", "FIND_INLET", "--out", str(tmp_path / "x.json")])
+
+
+def test_cli_case_fills_the_expected_result(tmp_path, isolated_env):
+    frames = tmp_path / "frames"
+    frames.mkdir()
+    for i in range(1, 3):
+        (frames / f"{i:05d}.jpg").write_bytes(jpeg((1920, 1080)))
+    out = tmp_path / "coffee_cup_02.json"
+    main([str(frames), "--case", "coffee_cup", "--take", "2", "--max-side", "1280", "--env-file", str(tmp_path / "none"), "--out", str(out)])
+    clip = json.loads(out.read_text())
+    assert clip["name"] == "coffee_cup_02"
+    assert clip["expect"] == {"final_step": "CONFIRM_PRODUCT", "completion_source": None, "waiting_reason": "PRODUCT_CONFLICT"}
+    assert clip["annotation"]["case"] == "coffee_cup" and clip["annotation"]["max_side"] == 1280
+
+
+def test_cli_needs_a_case_or_an_explicit_expectation(tmp_path, isolated_env):
+    with pytest.raises(SystemExit):
+        main([str(tmp_path), "--name", "x", "--out", str(tmp_path / "x.json")])
+    with pytest.raises(SystemExit):
+        main([str(tmp_path), "--final-step", "OPEN_CAP", "--out", str(tmp_path / "x.json")])
+

@@ -21,6 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .clip_cases import CASES
 from .models import CompletionSource, Observation, SceneAnswer, Step, VoiceIntent, WaitReason
 from .state_machine import DEFAULT_RULES, Rules, TransitionResult, apply_voice, new_session, transition
 from .vehicles import DEMO_SPEC, VehicleSpec, get_spec
@@ -142,6 +143,58 @@ def _check(report: ReplayReport) -> None:
         )
 
 
+STEP_ORDER = list(Step)
+
+
+def outcome(report: ReplayReport) -> str:
+    """How a clip failed. "too_far" and "wrong_record" are the failures that can mislead a driver."""
+    expect = report.clip.expect
+    if STEP_ORDER.index(report.final_step) > STEP_ORDER.index(expect.final_step):
+        return "too_far"
+    want_records = [expect.completion_source] if expect.completion_source else []
+    if report.records != want_records and report.records:
+        return "wrong_record"
+    if STEP_ORDER.index(report.final_step) < STEP_ORDER.index(expect.final_step):
+        return "stuck"
+    if report.passed:
+        return "pass"
+    return "wrong_wait" if report.waiting_reason is not expect.waiting_reason else "missing_record"
+
+
+OUTCOME_TEXT = {
+    "pass": "Pass",
+    "too_far": "Advanced too far",
+    "wrong_record": "Wrong record saved",
+    "stuck": "Stopped early",
+    "wrong_wait": "Wrong wait reason",
+    "missing_record": "Record not saved",
+}
+
+
+def render_report(reports: list[ReplayReport]) -> str:
+    counts = Counter(outcome(r) for r in reports)
+    annotations = [r.clip.annotation for r in reports if r.clip.annotation]
+    settings = sorted({f"{a.get('model')} effort={a.get('reasoning_effort')} max_side={a.get('max_side')}" for a in annotations})
+    lines = ["# Clip results", "", f"Passed {counts['pass']} of {len(reports)} clips."]
+    lines += [f"- Safety failures: {counts['too_far'] + counts['wrong_record']} (advanced too far or wrong record saved)"]
+    lines += [f"- Other failures: {counts['stuck'] + counts['wrong_wait'] + counts['missing_record']}"]
+    lines += [f"- Model: {setting}" for setting in settings]
+    if any(a.get("spark_mode") not in (None, "meta") for a in annotations):
+        lines.append("- Warning: some clips were not annotated by the real model.")
+    lines += ["", "| Clip | Result | Expected | Got |", "|---|---|---|---|"]
+    def cell(step: Step, wait: WaitReason | None, records: list[str]) -> str:
+        return " · ".join([step.value, *([wait.value] if wait else []), *records])
+    for r in sorted(reports, key=lambda item: (outcome(item) == "pass", item.clip.name)):
+        expect = r.clip.expect
+        want = cell(expect.final_step, expect.waiting_reason, [expect.completion_source.value] if expect.completion_source else [])
+        lines.append(f"| {r.clip.name} | {OUTCOME_TEXT[outcome(r)]} | {want} | {cell(r.final_step, r.waiting_reason, [s.value for s in r.records])} |")
+    shot = {a.get("case") for a in annotations}
+    if annotations:
+        missing = [case.id for case in CASES if case.id not in shot]
+        lines += ["", f"Cases not shot yet: {', '.join(missing) if missing else 'none'}"]
+    return "\n".join(lines) + "\n"
+
+
 def _clip_paths(targets: list[str]) -> list[Path]:
     paths: list[Path] = []
     for target in targets:
@@ -158,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agreements", type=int, default=DEFAULT_RULES.required_agreements)
     parser.add_argument("--max-age", type=float, default=DEFAULT_RULES.max_frame_age.total_seconds())
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--report", type=Path, default=None, help="write a Markdown results table")
     args = parser.parse_args(argv)
 
     rules = Rules(max_frame_age=timedelta(seconds=args.max_age), required_agreements=args.agreements)
@@ -182,6 +236,10 @@ def main(argv: list[str] | None = None) -> int:
     failed = sum(not r.passed for r in reports)
     wrong_records = sum(len(r.records) for r in reports if r.clip.expect.completion_source is None)
     print(f"\n{len(reports) - failed}/{len(reports)} clips passed · 잘못된 자동 기록 {wrong_records}건")
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(render_report(reports), encoding="utf-8")
+        print(f"wrote {args.report}")
     return 1 if failed else 0
 
 
