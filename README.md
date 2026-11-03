@@ -3,8 +3,13 @@
 **A hands-free car-care guide that sees the task, helps you finish it, and remembers what happened.**
 
 <p align="center">
-  <a href="docs/media/carmori-promo.mp4"><img src="docs/media/carmori-promo-poster.jpg" width="240" alt="Carmori promo film: Know your car" /></a><br />
-  <a href="docs/media/carmori-promo.mp4"><b>▶ Watch the 30-second promo</b></a>
+
+
+
+https://github.com/user-attachments/assets/ed7b1a9d-724c-48a9-ab49-3d51deea863e
+
+
+
 </p>
 
 *Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo sequence](#demo-3-minutes).*
