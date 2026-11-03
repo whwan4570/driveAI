@@ -175,6 +175,23 @@ Open `https://<Mac IP>:5174` in Safari. Keep `ca.key` and `server.key` private.
 - **Live speech-to-text:** [voice-service/README.md](voice-service/README.md) runs a Pipecat service on port 7860. Without it, the browser's voice detection and batch transcription are used.
 - **Native shells:** `web/ios` and `web/android` are Capacitor 8 projects with a small CarConnection plugin for CarPlay/Android Auto detection and native speech. Point them at the dev server with `CAP_SERVER_URL=http://localhost:5173 pnpm cap sync ios` (see `web/capacitor.config.ts`).
 
+### Deploy on Render
+
+[`render.yaml`](render.yaml) runs everything as one web service. FastAPI serves the built web app at `/` and the API at `/api`, so there is one HTTPS address and no CORS or proxy setup. Phones can use the camera there without installing a certificate.
+
+1. In Render, choose **New → Blueprint**, then pick this repository.
+2. Enter `META_API_KEY` when asked.
+3. Deploy, then open `https://<service>.onrender.com`.
+
+The Blueprint uses the paid **Starter** plan and a 1 GB disk at `/var/data`. Render bills both by the time used. The disk keeps SQLite, downloaded manuals and 3D models through deploys and restarts, and Starter does not sleep. On the free plan the server sleeps after 15 minutes idle and loses saved data on restart. Switch the plan back and remove the disk when the demo is over.
+
+To run the deployed setup locally after `pnpm build` in `web/`:
+
+```bash
+cd backend
+.venv/bin/uvicorn carmori.site:create_site --factory --port 8000
+```
+
 ### Configuration
 
 | Variable | Default | Purpose |
