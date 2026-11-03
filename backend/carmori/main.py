@@ -262,7 +262,7 @@ class ManualRecordIn(BaseModel):
 
 class InspectionIn(BaseModel):
     component: Literal["washer_fluid", "tires"]
-    photo_type: Literal["engine", "product", "tire"]
+    photo_type: Literal["engine", "product", "tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"]
     jpeg_base64: str = Field(min_length=100, max_length=5_600_000)
 
 
@@ -692,7 +692,7 @@ def create_app(
     @app.post("/vehicles/{vehicle_id}/inspections/analyze", response_model=InspectionResult)
     async def analyze_inspection(vehicle_id: str, body: InspectionIn) -> InspectionResult:
         vehicle_or_404(vehicle_id)
-        if (body.component == "washer_fluid" and body.photo_type == "tire") or (body.component == "tires" and body.photo_type != "tire"):
+        if (body.component == "washer_fluid" and body.photo_type not in {"engine", "product"}) or (body.component == "tires" and body.photo_type not in {"tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"}):
             raise HTTPException(422, "photo type does not match component")
         try:
             jpeg = base64.b64decode(body.jpeg_base64, validate=True)
@@ -766,16 +766,35 @@ def create_app(
         decoded = [[base64.b64decode(f.jpeg_base64) for f in w.frames] for w in windows]
 
         async def analyze(frames: list[bytes]) -> tuple[SceneAnswer | None, str | None]:
-            try:
-                answer = await asyncio.wait_for(
-                    spark.analyze(frames, snapshot.step, reference), settings.spark_timeout_s
-                )
-                return answer, None
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                return None, "model_billing_required" if status == 402 else "model_unauthorized" if status in (401, 403) else "model_error"
-            except Exception:  # noqa: BLE001 - 모델 실패는 대기로 처리한다
-                return None, "model_error"
+            for attempt in range(2):
+                try:
+                    answer = await asyncio.wait_for(
+                        spark.analyze(frames, snapshot.step, reference), settings.spark_timeout_s
+                    )
+                    return answer, None
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    if attempt == 0 and (status == 429 or 500 <= status < 600):
+                        _carmori_log.warning("Vision request returned HTTP %d; retrying once", status)
+                        await asyncio.sleep(0.25)
+                        continue
+                    _carmori_log.warning("Vision request failed with HTTP %d", status)
+                    return None, "model_billing_required" if status == 402 else "model_unauthorized" if status in (401, 403) else "model_error"
+                except (httpx.TimeoutException, asyncio.TimeoutError):
+                    # A second full timeout could outlast the browser's 30-second request limit.
+                    _carmori_log.warning("Vision request timed out")
+                    return None, "model_error"
+                except httpx.TransportError as exc:
+                    if attempt == 0:
+                        _carmori_log.warning("Vision transport error (%s); retrying once", type(exc).__name__)
+                        await asyncio.sleep(0.25)
+                        continue
+                    _carmori_log.warning("Vision transport error (%s)", type(exc).__name__)
+                    return None, "model_error"
+                except Exception as exc:  # noqa: BLE001 - never expose provider or image details
+                    _carmori_log.warning("Vision analysis failed (%s)", type(exc).__name__)
+                    return None, "model_error"
+            return None, "model_error"
 
         started = time.perf_counter()
         analyzed = await asyncio.gather(*(analyze(frames) for frames in decoded))

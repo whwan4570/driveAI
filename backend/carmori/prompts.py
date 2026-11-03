@@ -64,14 +64,24 @@ def fields_for(step: Step | None) -> tuple[str, ...]:
 def build_scene_prompt(step: Step | None, *, has_reference: bool) -> str:
     fields = fields_for(step)
     reference = " Image 1 is the last confirmed step; compare cap_state with it." if has_reference else ""
-    guidance = ("Check image edges. A washer cap may be blue on a narrow white filler neck; color alone is not enough. "
-                "Exclude oil, coolant, radiator and brake caps." if step is Step.FIND_INLET else
-                "Report only what is visible; use unclear when unsure.")
+    if step is Step.FIND_INLET:
+        guidance = ("Check image edges. A washer cap may be blue on a narrow white filler neck; color alone is not enough. "
+                    "Exclude oil, coolant, radiator and brake caps.")
+    elif step is Step.CONFIRM_PRODUCT:
+        guidance = ("Inspect only the bottle label in the current image(s). Transcribe readable words exactly. "
+                    "A visible drink cup or clearly unrelated item is other, even if its label is small. "
+                    "A brand name, bottle color or shape alone does not prove it is washer fluid. "
+                    "Use washer_fluid only when the label identifies it; otherwise use unreadable when unsure.")
+    else:
+        guidance = "Report only what is visible; use unclear when unsure."
+    scene = ("Bottle-label check during a washer fluid refill. Images are current views of the product."
+             if step is Step.CONFIRM_PRODUCT else
+             f"Fixed camera at a car engine bay during a washer fluid refill. Frames are in time order.{reference}")
     return "\n".join([
-        f"Fixed camera at a car engine bay during a washer fluid refill. Frames are in time order.{reference}",
+        scene,
         guidance,
         "Reply with only one JSON object, no other text, with these keys:",
-        *(f"{name}: {FIELD_GUIDE[name]}" for name in fields),
+        *(f"{name}: {('true|false: the item is physically hidden; false if it is visible but its words are too small' if step is Step.CONFIRM_PRODUCT and name == 'occluded' else FIELD_GUIDE[name])}" for name in fields),
     ])
 
 

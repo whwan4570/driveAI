@@ -189,6 +189,7 @@ def test_same_hint_is_not_repeated_but_repeat_intent_forces_it():
         ("Brake Fluid DOT4", ProductClass.OTHER, WaitReason.PRODUCT_CONFLICT),
         (None, ProductClass.UNREADABLE, WaitReason.PRODUCT_UNKNOWN),
         ("사계절 워셔액", ProductClass.OTHER, WaitReason.PRODUCT_UNKNOWN),
+        ("Dine In #148 Americano 20oz Iced", ProductClass.UNREADABLE, WaitReason.PRODUCT_CONFLICT),
         (None, ProductClass.OTHER, WaitReason.PRODUCT_CONFLICT),
     ],
 )
@@ -264,6 +265,31 @@ def test_full_observed_sequence_records_once_with_deterministic_id():
     assert r.completion.flow_observed
     assert len(r.completion.evidence_frames) == 20  # 전환 5번 × 확인 묶음 2개 × 프레임 2장
     assert d.obs(DONE).reason == "already_recorded"
+
+
+def test_finish_records_when_cap_closes_after_bottle_leaves_view():
+    d = at_pour()
+    d.obs(POUR_FLOW)
+    d.obs(POUR_FLOW)
+    closed_cap = SceneAnswer(cap_state=CapState.CLOSED, bottle_upright=Tri.UNCLEAR)
+    assert d.obs(closed_cap).completion is None
+    result = d.obs(closed_cap)
+    assert d.state.step is Step.RECORDED
+    assert result.completion is not None
+    assert result.completion.completion_source is CompletionSource.OBSERVED_SEQUENCE
+
+
+def test_unseen_pour_still_needs_confirmation_after_cap_closes():
+    d = at_pour()
+    tilt = SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_visible=Tri.UNCLEAR)
+    d.obs(tilt)
+    d.obs(tilt)
+    closed_cap = SceneAnswer(cap_state=CapState.CLOSED, bottle_upright=Tri.UNCLEAR)
+    d.obs(closed_cap)
+    result = d.obs(closed_cap)
+    assert d.state.step is Step.FINISH
+    assert d.state.waiting_reason is WaitReason.NEED_VOICE_CONFIRM
+    assert result.completion is None
 
 
 def test_tilt_without_visible_flow_needs_voice_confirmation():

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "../components/Icons";
 import { api, type InspectionResult, type Vehicle } from "../lib/api";
-import { FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
+import { cameraFailureMessage, FULL_FRAME, grabJpeg, openRearCamera } from "../lib/camera";
 import { photoFromFile } from "../lib/photos";
 
 // Opens straight into the camera: frame the tire, take the shot, then review and save on the same view.
@@ -9,7 +9,8 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [cameraReady, setCameraReady] = useState(false);
-  const [cameraFailed, setCameraFailed] = useState(false);
+  const [cameraFailure, setCameraFailure] = useState<string | null>(null);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
   const [photo, setPhoto] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<InspectionResult | null>(null);
   const [showReadings, setShowReadings] = useState(false);
@@ -22,14 +23,33 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
 
   useEffect(() => {
     if (photo || !videoRef.current) return;
+    const video = videoRef.current;
     let stopped = false;
     let stream: MediaStream | null = null;
     setCameraReady(false);
-    openRearCamera(videoRef.current)
-      .then((opened) => { if (stopped) opened.getTracks().forEach((track) => track.stop()); else { stream = opened; setCameraReady(true); } })
-      .catch(() => { if (!stopped) setCameraFailed(true); });
-    return () => { stopped = true; stream?.getTracks().forEach((track) => track.stop()); };
-  }, [photo]);
+    setCameraFailure(null);
+    // StrictMode immediately cleans up the first effect in development. Defer opening so
+    // it cannot race the second effect and leave Safari attached to a stopped stream.
+    const timer = window.setTimeout(() => {
+      void openRearCamera(video)
+        .then((opened) => {
+          if (stopped) {
+            opened.getTracks().forEach((track) => track.stop());
+            if (video.srcObject === opened) video.srcObject = null;
+          } else {
+            stream = opened;
+            setCameraReady(true);
+          }
+        })
+        .catch((cause) => { if (!stopped) setCameraFailure(cameraFailureMessage(cause)); });
+    }, 0);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+      if (video.srcObject === stream) video.srcObject = null;
+    };
+  }, [photo, cameraAttempt]);
 
   const analyze = async (data: string) => {
     setPhoto(`data:image/jpeg;base64,${data}`);
@@ -56,7 +76,6 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
 
   const retake = () => {
     setPhoto(null); setAnalysis(null); setConfirmed(false); setError(null);
-    if (cameraFailed) inputRef.current?.click();
   };
 
   const save = async (event: FormEvent) => {
@@ -85,8 +104,8 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
         {box && <span className="arw-box" style={{ left: `${box[0] * 100}%`, top: `${box[1] * 100}%`, width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%` }}/>}
       </div> : <>
         <video ref={videoRef} playsInline muted/>
-        {!cameraFailed && <div className="arw-tire-guide" aria-hidden="true"><span>Fit the whole tire in the circle</span></div>}
-        {cameraFailed && <p className="arw-no-camera">Camera unavailable. Upload a tire photo instead.</p>}
+        {cameraReady && <div className="arw-tire-guide" aria-hidden="true"><span>Fit the whole tire in the circle</span></div>}
+        {cameraFailure && <p className="arw-no-camera" role="alert">{cameraFailure}</p>}
       </>}
     </div>
 
@@ -95,7 +114,7 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
       <div className="arw-progress"><strong>{photo ? "2/2 · Review" : "1/2 · Take the photo"}</strong>
         <div className="arw-progress-track">{[1, 2].map((n) => <i key={n} className={n === 1 || photo ? "filled" : ""}/>)}</div>
       </div>
-      <span className="arw-live"><span/>LIVE</span>
+      {cameraReady && !photo && <span className="arw-live"><span/>LIVE</span>}
     </header>
 
     <input ref={inputRef} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void upload(event.target.files?.[0]); event.target.value = ""; }}/>
@@ -108,7 +127,8 @@ export function TireInspection({ vehicle, onSaved, onCancel }: { vehicle: Vehicl
         <p>A photo shows visible issues only. It cannot measure tread depth or pressure.</p>
         <div className="arw-actions">
           <button type="button" className="arw-secondary" onClick={() => inputRef.current?.click()}><Icon name="file" size={18}/>Upload</button>
-          <button type="button" className="arw-primary" onClick={shoot} disabled={!cameraReady}><Icon name="camera" size={18}/>Take photo</button>
+          {cameraFailure ? <button type="button" className="arw-primary" onClick={() => setCameraAttempt((attempt) => attempt + 1)}><Icon name="camera" size={18}/>Try camera again</button>
+            : <button type="button" className="arw-primary" onClick={shoot} disabled={!cameraReady}><Icon name="camera" size={18}/>{cameraReady ? "Take photo" : "Starting camera…"}</button>}
         </div>
       </section> : <form className="arw-card k-form" onSubmit={(event) => void save(event)}>
         <span className="arw-status"><span className={`arw-dot${busy && !analysis ? " pulsing" : ""}`}/>{busy && !analysis ? "Looking at the tire…" : "Review and save"}</span>

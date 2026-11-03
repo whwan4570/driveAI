@@ -17,7 +17,28 @@ export function roiAround(cx: number, cy: number, size = 0.5): Roi {
   return { x, y, w: size, h: size };
 }
 
+export function cameraFailureMessage(error: unknown): string {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    return "This address is not a trusted secure connection. Open Carmori over trusted HTTPS to use the camera.";
+  }
+  const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Safari blocked the camera for this site. Allow Camera in this site's settings, then try again.";
+  }
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "No usable camera was found on this device.";
+  }
+  if (name === "NotReadableError" || name === "AbortError") {
+    return "The camera could not start. Close other camera apps, then try again.";
+  }
+  if (name === "CameraPlaybackError") {
+    return "The camera opened, but the video could not play. Tap Try camera again.";
+  }
+  return `The camera could not start${name ? ` (${name})` : ""}. Try again or reopen the guide.`;
+}
+
 export async function openRearCamera(video: HTMLVideoElement, size: { width: number; height: number } = { width: 1280, height: 720 }): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API unavailable");
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: { facingMode: { ideal: "environment" }, width: { ideal: size.width }, height: { ideal: size.height } },
@@ -25,12 +46,15 @@ export async function openRearCamera(video: HTMLVideoElement, size: { width: num
   video.srcObject = stream;
   video.muted = true;
   video.playsInline = true;
+  video.autoplay = true;
   try {
     await video.play();
   } catch (error) {
     stream.getTracks().forEach((track) => track.stop());
-    video.srcObject = null;
-    throw error;
+    if (video.srcObject === stream) video.srcObject = null;
+    const playbackError = new Error("Camera video playback failed", { cause: error });
+    playbackError.name = "CameraPlaybackError";
+    throw playbackError;
   }
   return stream;
 }

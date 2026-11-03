@@ -19,7 +19,9 @@ function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-export function ZoomableInterior({ src, alt }: { src: string; alt: string }) {
+type InteriorMarker = { title: string; severity: "caution" | "warning"; onClick: () => void };
+
+export function ZoomableInterior({ src, alt, marker }: { src: string; alt: string; marker?: InteriorMarker }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pointersRef = useRef(new Map<number, Point>());
   const lastPointerRef = useRef<Point | null>(null);
@@ -105,7 +107,12 @@ export function ZoomableInterior({ src, alt }: { src: string; alt: string }) {
     <div ref={viewportRef} className={`status-interior-image-viewport${view.scale > 1 ? " is-zoomed" : ""}`}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
       onDoubleClick={() => zoomTo(viewRef.current.scale === 1 ? 2 : 1)}>
-      <img src={src} alt={alt} draggable={false} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}/>
+      <div className="status-interior-scene" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+        <img src={src} alt={alt} draggable={false}/>
+        {marker && <button type="button" className={`vehicle-hotspot status-interior-hotspot ${marker.severity}`}
+          aria-label={`${marker.title}. Show summary`} onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); marker.onClick(); }}><span className="vehicle-hotspot-core"/></button>}
+      </div>
     </div>
     <div className="status-interior-zoom-controls" role="group" aria-label="Interior photo zoom">
       <button type="button" aria-label="Zoom out" disabled={view.scale <= MIN_SCALE} onClick={() => zoomTo(viewRef.current.scale / 1.5)}>−</button>

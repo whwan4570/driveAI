@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon, Waveform } from "../components/Icons";
 import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
-import { cameraFrameIsBlank, FULL_FRAME, grabJpeg, openRearCamera, roiAround, waitForCameraFrame, type Roi } from "../lib/camera";
+import { cameraFailureMessage, cameraFrameIsBlank, FULL_FRAME, grabJpeg, openRearCamera, roiAround, waitForCameraFrame, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
 import { WorkSessionController } from "../lib/workSession";
 import { useUtterances, useVoice } from "../voiceContext";
@@ -14,7 +14,7 @@ const STEPS: Record<Step, { title: string; instruction: string; number: number }
   OPEN_CAP: { title: "Open the cap", instruction: "Open the washer fluid cap", number: 1 },
   CONFIRM_PRODUCT: { title: "Check the product", instruction: "Show the bottle label to the camera", number: 2 },
   POUR: { title: "Refill washer fluid", instruction: "Tilt the bottle over the inlet and pour slowly", number: 3 },
-  FINISH: { title: "Finish up", instruction: "Set the bottle upright and close the cap", number: 4 },
+  FINISH: { title: "Finish up", instruction: "Close the washer fluid cap and leave it in view", number: 4 },
   RECORDED: { title: "Saved to history", instruction: "Your washer fluid refill is on record", number: 4 },
 };
 
@@ -22,8 +22,8 @@ const WAIT_MESSAGE: Record<WaitReason, string> = {
   OCCLUDED: "The inlet is blocked from view. Move your hand or the bottle aside.",
   WRONG_PART: "That may be a different part. Show the washer cap and its narrow filler neck.",
   CAP_ALREADY_OPEN: "I missed the cap before it opened. Show the cap in view.",
-  PRODUCT_CONFLICT: "This isn't washer fluid. Don't pour it.",
-  PRODUCT_UNKNOWN: "I cannot read the label. Point the front of the bottle at the camera.",
+  PRODUCT_CONFLICT: "This isn't washer fluid. Show a washer-fluid bottle before pouring.",
+  PRODUCT_UNKNOWN: "Move the product label closer, hold it still, and show the words that identify the fluid.",
   NEED_VOICE_CONFIRM: "Did you finish the refill? Say yes to save it, or use the confirmation below.",
 };
 
@@ -46,6 +46,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const pendingCommandsRef = useRef(0);
   const [commandPending, setCommandPending] = useState(false);
   const roiRef = useRef<Roi>(FULL_FRAME);
+  const labelRoiRef = useRef<Roi>(FULL_FRAME);
   const stepRef = useRef<Step | null>(null);
   const roiSelectedRef = useRef(false);
   const [bottleChanged, setBottleChanged] = useState(false);
@@ -59,7 +60,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [error, setError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const voiceErrorTimerRef = useRef<number | null>(null);
-  const [cameraAvailable, setCameraAvailable] = useState(true);
+  const [cameraAvailable, setCameraAvailable] = useState(false);
+  const [cameraOpening, setCameraOpening] = useState(true);
+  const [cameraFailure, setCameraFailure] = useState<string | null>(null);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
   const [demoMode, setDemoMode] = useState(false);
   const [visionStatus, setVisionStatus] = useState<string>("unverified");
   const [inspection, setInspection] = useState<InspectionResult | null>(null);
@@ -68,6 +72,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [searchFinished, setSearchFinished] = useState(false);
   const [searchPass, setSearchPass] = useState(0);
   const [scanningLabel, setScanningLabel] = useState(false);
+  const [labelRead, setLabelRead] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [hands, setHands] = useState<HandPoint[][]>([]);
   const [handTracking, setHandTracking] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -89,21 +94,6 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   useEffect(() => {
     api.health().then((h) => { setDemoMode(h.demo_mode); setVisionStatus(h.vision_status); }).catch(() => { setVisionStatus("unavailable"); });
-    let stream: MediaStream | null = null;
-    let cancelled = false;
-    if (videoRef.current) {
-      // A small filler cap and its symbol need more pixels than the other camera views. Session frames still scale down.
-      openRearCamera(videoRef.current, { width: 1920, height: 1080 })
-        .then((s) => {
-          if (cancelled) s.getTracks().forEach((t) => t.stop());
-          else {
-            stream = s;
-            const video = videoRef.current;
-            if (video?.videoWidth && video.videoHeight) setVideoSize({ width: video.videoWidth, height: video.videoHeight });
-          }
-        })
-        .catch(() => { if (!cancelled) setCameraAvailable(false); });
-    }
     const onVisibility = () => {
       if (document.hidden && controllerRef.current) {
         controllerRef.current.setPaused(true);
@@ -114,14 +104,45 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      cancelled = true;
       if (transitionTimerRef.current !== null) window.clearTimeout(transitionTimerRef.current);
       if (voiceErrorTimerRef.current !== null) window.clearTimeout(voiceErrorTimerRef.current);
       document.removeEventListener("visibilitychange", onVisibility);
       controllerRef.current?.stop();
-      stream?.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+    setCameraOpening(true);
+    setCameraAvailable(false);
+    setCameraFailure(null);
+    // A small filler cap and its symbol need more pixels than the other camera views. Session frames still scale down.
+    openRearCamera(video, { width: 1920, height: 1080 })
+      .then((opened) => {
+        if (cancelled) opened.getTracks().forEach((track) => track.stop());
+        else {
+          stream = opened;
+          setCameraAvailable(true);
+          setCameraOpening(false);
+          if (video.videoWidth && video.videoHeight) setVideoSize({ width: video.videoWidth, height: video.videoHeight });
+        }
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setCameraAvailable(false);
+          setCameraOpening(false);
+          setCameraFailure(cameraFailureMessage(cause));
+        }
+      });
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((track) => track.stop());
+      if (video.srcObject === stream) video.srcObject = null;
+    };
+  }, [cameraAttempt]);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -176,6 +197,16 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         return { width, height, offsetX: (width - viewportSize.width) / 2, offsetY: (height - viewportSize.height) / 2 };
       })()
     : null;
+
+  // The on-screen label guide corresponds to a smaller part of the camera frame on a tall phone.
+  // Capture that exact visible region so label letters survive image downscaling.
+  if (cover) {
+    const x1 = (viewportSize.width * 0.08 + cover.offsetX) / cover.width;
+    const y1 = (viewportSize.height * 0.13 + cover.offsetY) / cover.height;
+    const x2 = (viewportSize.width * 0.92 + cover.offsetX) / cover.width;
+    const y2 = (viewportSize.height * 0.53 + cover.offsetY) / cover.height;
+    labelRoiRef.current = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  }
 
   useEffect(() => {
     const video = videoRef.current;
@@ -269,6 +300,12 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   const applyUpdate = (u: SessionUpdate) => {
     setSession(u.session);
+    if (u.session.step === "CONFIRM_PRODUCT") {
+      const readable = u.windows.map((window) => window.answer?.label_text?.trim()).filter((label): label is string => !!label);
+      setLabelRead(readable.at(-1)?.slice(0, 80) ?? null);
+    } else {
+      setLabelRead(null);
+    }
     setBottleChanged(u.transition_reason === "bottle_changed");
     if (u.transition_event) {
       const message: Partial<Record<Step, string>> = {
@@ -324,8 +361,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       const controller = new WorkSessionController({
         video,
         // The bottle is held wherever the driver stands, so the label step cannot use the inlet crop.
-        getRoi: () => stepRef.current === "CONFIRM_PRODUCT" ? FULL_FRAME : roiRef.current,
-        getMaxSide: () => stepRef.current === "CONFIRM_PRODUCT" ? 1280 : 768,
+        getRoi: () => stepRef.current === "CONFIRM_PRODUCT" ? labelRoiRef.current : roiRef.current,
+        getMaxSide: () => stepRef.current === "CONFIRM_PRODUCT" ? 1600 : 768,
         sessionId: update.session.session_id,
         stateVersion: update.session.state_version,
         onUpdate: applyUpdate,
@@ -406,7 +443,25 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   // The whole guide happens on the camera view: progress on top, the inlet cue in the scene, one card at the bottom.
   return <div className="app-shell work-shell"><main className="arw">
     <div className={`arw-viewport${session ? " session-active" : ""}`} ref={viewportRef} onClick={pickRoi}>
-      <video ref={videoRef} playsInline muted onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}/>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        // Size the live preview with the same cover geometry used by the markers and label crop.
+        // Safari can render a MediaStream with black side bars despite object-fit: cover.
+        style={cover ? {
+          left: -cover.offsetX,
+          top: -cover.offsetY,
+          right: "auto",
+          bottom: "auto",
+          width: cover.width,
+          height: cover.height,
+          objectFit: "fill",
+        } : undefined}
+        onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
+        onResize={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
+      />
       {cover && hands.length > 0 && <svg className="hand-overlay" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
         {hands.flatMap((hand, handIndex) => [
           ...HAND_CHAINS.map((chain, chainIndex) => <path key={`h${handIndex}-c${chainIndex}`} d={chain.map((index, pointIndex) => {
@@ -443,9 +498,12 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
       <section className={`arw-card${!session && cameraAvailable && !visionBlocked ? " is-setup" : ""}${waiting ? " is-waiting" : ""}${done ? " is-done" : ""}`} aria-live="polite">
         {!session ? !cameraAvailable ? <>
-          <h1>The guide needs the camera</h1>
-          <p>It watches the washer inlet live. Allow camera access, then open the guide again.</p>
-          <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
+          <h1>{cameraOpening ? "Starting camera…" : "The camera could not start"}</h1>
+          <p>{cameraOpening ? "Waiting for your camera." : cameraFailure ?? "Check camera access and try again."}</p>
+          {!cameraOpening && <div className="arw-actions">
+            <button type="button" className="arw-secondary" onClick={onDone}>Back</button>
+            <button type="button" className="arw-primary" onClick={() => setCameraAttempt((attempt) => attempt + 1)}>Try camera again</button>
+          </div>}
         </> : visionBlocked ? <>
           <h1>Camera guidance is unavailable</h1>
           <p>Use your vehicle manual to find the cap and check the label. You can save a finished refill from History.</p>
@@ -471,11 +529,13 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
             <span className="arw-status"><span className={`arw-dot${!session.paused ? " pulsing" : ""}`}/>{statusLabel}</span>
           </div>
           <h1>{instruction}</h1>
-          {failurePaused && <button type="button" className="arw-secondary is-wide" onClick={() => { setError(null); failurePausedRef.current = false; setFailurePaused(false); controllerRef.current?.setPaused(session.paused); }}>Try again</button>}
-          {waiting === "NEED_VOICE_CONFIRM" ? <div className="arw-actions">
+          {session.paused ? <button type="button" className="arw-primary is-wide" onClick={() => void sendIntent(session.session_id, "RESUME", "touch")} disabled={commandPending}>Resume guide</button>
+          : failurePaused ? <button type="button" className="arw-secondary is-wide" onClick={() => { setError(null); failurePausedRef.current = false; setFailurePaused(false); controllerRef.current?.setPaused(false); }}>Try again</button>
+          : waiting === "NEED_VOICE_CONFIRM" ? <div className="arw-actions">
             <button type="button" className="arw-secondary" onClick={() => void sendIntent(session.session_id, "CONFIRM_NO", "touch")}>Not yet</button>
             <button type="button" className="arw-primary" onClick={() => void sendIntent(session.session_id, "CONFIRM_YES", "touch")}>Yes, refilled</button>
           </div> : session.step === "CONFIRM_PRODUCT" ? <>
+            {labelRead && <p className="arw-note" role="status">Read: “{labelRead}”</p>}
             <button type="button" className="arw-secondary is-wide" onClick={() => void scanLabel()} disabled={scanningLabel || session.paused}><Icon name="camera" size={18}/>{scanningLabel ? "Hold it steady…" : "Scan label now"}</button>
           </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Voice is off. The camera keeps guiding."}</span></div>}
         </>}

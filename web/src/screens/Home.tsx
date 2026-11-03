@@ -20,7 +20,7 @@ import { Captions, type Caption } from "./Captions";
 import { Documents } from "./Documents";
 import { RecordForm } from "./RecordForm";
 import { Places } from "./Places";
-import { TireInspection } from "./TireInspection";
+import { TireVisualGuide } from "./TireVisualGuide";
 import { VehicleEditor } from "./VehicleEditor";
 
 type Tab = "home" | "status" | "places" | "assistant" | "guide" | "history" | "documents";
@@ -880,12 +880,12 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
             </button>
             <button className="k-row" type="button" onClick={() => setTireOpen(true)}>
               <span className="k-row-art"><Icon name="status" size={22}/></span>
-              <span className="k-row-main"><strong>Tire visual check</strong><small>Photograph a tire and add gauge readings</small></span>
+              <span className="k-row-main"><strong>Tire visual check</strong><small>Check all four tires with automatic sidewall and tread scans</small></span>
               <Icon className="k-row-trail" name="chevron" size={18}/>
             </button>
           </section>
         </>}
-        {tireOpen && vehicle && <TireInspection vehicle={vehicle} onSaved={() => { setTireOpen(false); void refreshData(); goToTab("history"); }} onCancel={() => setTireOpen(false)}/>}
+        {tireOpen && vehicle && <TireVisualGuide vehicle={vehicle} onSaved={() => { setTireOpen(false); void refreshData(); goToTab("history"); }} onCancel={() => setTireOpen(false)}/>}
       </div>}
 
       {!profileOpen && tab === "history" && <div className="k-home">

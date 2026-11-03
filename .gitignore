@@ -13,6 +13,7 @@ __pycache__/
 # web
 web/node_modules/
 web/dist/
+web/.local-https/
 web/public/vad/
 web/src/vendor/
 *.tsbuildinfo

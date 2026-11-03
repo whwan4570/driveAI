@@ -115,7 +115,16 @@ export interface InspectionResult {
   product_status: "MATCH" | "CONFLICT" | "UNKNOWN";
   product_label: string | null;
   source: "meta_vision" | "unavailable";
+  tire_view_valid: boolean | null;
+  tire_findings: ("bulge" | "cut" | "crack" | "uneven_wear" | "wear_bar_level")[];
+  gauge_value: number | null;
+  gauge_unit: "mm" | "32nds_inch" | null;
+  tire_box: [number, number, number, number] | null;
+  view_quality: TireViewQuality | null;
+  rejection_reason: TireViewQuality | null;
 }
+
+export type TireViewQuality = "good" | "blurry" | "dark" | "too_small" | "wrong_view" | "no_tire" | "unclear";
 
 export interface VehicleScanResult {
   status: "recognized" | "unrecognized" | "unavailable";
@@ -175,6 +184,7 @@ export interface SessionUpdate {
   transition_reason: string;
   spoken_hint: string | null;
   record: MaintenanceRecord | null;
+  windows: { sequence_id: number; accepted: boolean; reason: string; answer: { label_text: string | null; product_class: string } | null }[];
   transition_event: TransitionEvidence | null;
 }
 
@@ -333,7 +343,7 @@ export const api = {
   washerShopping: (vehicleId: string) => call<WasherShoppingPick>(`/vehicles/${vehicleId}/shopping/washer`),
   addRecord: (body: { vehicle_id: string; component: "washer_fluid" | ServiceComponent; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
-  analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire"; jpeg_base64: string }) =>
+  analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire" | "tire_sidewall" | "tire_tread" | "tire_tread_gauge"; jpeg_base64: string }) =>
     postWithTimeout<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body, 30_000),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),

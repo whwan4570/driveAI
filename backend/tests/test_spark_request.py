@@ -57,5 +57,18 @@ def test_scene_prompt_lists_only_step_fields_and_stays_short():
         prompt = build_scene_prompt(step, has_reference=True)
         listed = [line.split(":", 1)[0] for line in prompt.splitlines()[3:]]
         assert listed == list(fields)
-        assert "Image 1 is the last confirmed step" in prompt
+        assert ("Image 1 is the last confirmed step" in prompt) is not (step is Step.CONFIRM_PRODUCT)
         assert len(prompt) < 1000
+
+
+def test_product_check_uses_current_label_frames_without_engine_reference(monkeypatch):
+    sent = capture_requests(monkeypatch, '{"occluded": false, "label_text": "Windshield Washer Fluid", "product_class": "washer_fluid"}')
+    client = MetaSparkClient(Settings(meta_api_key="k", spark_mode="meta"))
+    answer = asyncio.run(client.analyze([b"\xff\xd8label\xff\xd9"], Step.CONFIRM_PRODUCT, reference=b"\xff\xd8engine\xff\xd9"))
+    content = sent[0]["messages"][0]["content"]
+    assert len([part for part in content if part["type"] == "image_url"]) == 1
+    assert "Bottle-label check" in content[0]["text"]
+    assert "the item is physically hidden" in content[0]["text"]
+    assert "visible drink cup" in content[0]["text"]
+    assert "Image 1 is the last confirmed step" not in content[0]["text"]
+    assert answer.label_text == "Windshield Washer Fluid"

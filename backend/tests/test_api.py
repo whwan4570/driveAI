@@ -111,6 +111,54 @@ def test_model_failure_clears_pending_and_does_not_advance():
     assert retry["session"]["step"] == "FIND_INLET" and retry["transition_event"] is None
 
 
+def test_transient_vision_failure_retries_before_evaluating_transition():
+    class TemporarilyUnavailable(HappyPathSpark):
+        calls = 0
+
+        async def analyze(self, frames, step, reference=None):
+            self.calls += 1
+            if self.calls <= 2:
+                request = httpx.Request("POST", "https://example.test/vision")
+                response = httpx.Response(503, request=request)
+                raise httpx.HTTPStatusError("temporarily unavailable", request=request, response=response)
+            return await super().analyze(frames, step, reference)
+
+    spark = TemporarilyUnavailable()
+    client = TestClient(create_app(Settings(), spark=spark))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+
+    result = client.post(f"/sessions/{sid}/observations", json=windows(1)).json()
+
+    assert spark.calls == 4
+    assert result["session"]["step"] == "OPEN_CAP"
+    assert result["transition_event"]["sequence_ids"] == [1, 2]
+    assert client.get("/health").json()["vision_status"] == "ready"
+
+
+def test_non_retryable_vision_failure_does_not_advance():
+    class BadRequest(HappyPathSpark):
+        calls = 0
+
+        async def analyze(self, frames, step, reference=None):
+            self.calls += 1
+            request = httpx.Request("POST", "https://example.test/vision")
+            response = httpx.Response(400, request=request)
+            raise httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    spark = BadRequest()
+    client = TestClient(create_app(Settings(), spark=spark))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+
+    result = client.post(f"/sessions/{sid}/observations", json=windows(1)).json()
+
+    assert spark.calls == 2
+    assert result["transition_reason"] == "model_error"
+    assert result["transition_event"] is None
+    assert result["session"]["step"] == "FIND_INLET"
+
+
 def test_mixed_model_results_keep_billing_error_and_do_not_advance():
     class BillingOnSecondWindow(HappyPathSpark):
         calls = 0

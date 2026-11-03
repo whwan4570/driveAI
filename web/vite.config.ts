@@ -1,14 +1,21 @@
+import { readFileSync } from "node:fs";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// 휴대폰 카메라·마이크는 HTTPS에서만 열리므로 개발 서버도 HTTPS로 띄운다.
-// 데스크톱 미리보기(localhost)는 HTTP도 보안 컨텍스트라 CARMORI_HTTP=1로 끌 수 있다.
+// A phone needs a certificate it trusts for camera and microphone access.
+// basicSsl is only a fallback for desktop development; its certificate is not trusted on iOS.
 const useHttps = !process.env.CARMORI_HTTP;
+const certificatePath = process.env.CARMORI_HTTPS_CERT;
+const keyPath = process.env.CARMORI_HTTPS_KEY;
+const localHttps = useHttps && certificatePath && keyPath
+  ? { cert: readFileSync(certificatePath), key: readFileSync(keyPath) }
+  : undefined;
 
 export default defineConfig({
-  plugins: [react(), ...(useHttps ? [basicSsl()] : [])],
+  plugins: [react(), ...(useHttps && !localHttps ? [basicSsl()] : [])],
   server: {
+    ...(localHttps ? { https: localHttps } : {}),
     proxy: {
       "/api": {
         target: process.env.CARMORI_API ?? "http://127.0.0.1:8000",

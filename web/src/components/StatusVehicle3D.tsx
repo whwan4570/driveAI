@@ -8,10 +8,11 @@ import { ZoomableInterior } from "./ZoomableInterior";
 
 type Severity = "clear" | "caution" | "warning" | "unknown";
 type StatusComponent = ServiceComponent | "washer_fluid";
-type Concern = { component: StatusComponent; severity: "caution" | "warning"; title: string; explanation: string };
+type Concern = { component: StatusComponent; severity: "caution" | "warning"; title: string; summary: string };
 type ModelBounds = { center: { x: number; y: number; z: number }; dimensions: { x: number; y: number; z: number } };
 
 // These are approximate service areas on the illustration, not part diagnostics.
+// The oil filter is not visible on the closed exterior model; the cabin filter is behind the glove box.
 const MARKER_OFFSETS: Record<StatusComponent, [number, number, number]> = {
   washer_fluid: [-0.14, 0.07, 0.28], engine_oil: [0.02, 0.08, 0.28], engine_oil_filter: [0.13, 0.08, 0.20],
   tires: [0.23, -0.10, 0.30], brake_pads: [0.23, -0.10, 0.12], brake_fluid: [-0.11, 0.08, 0.08],
@@ -94,8 +95,8 @@ export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview
       const tone = serviceTone(percent, recommendation?.priority);
       if (tone !== "due" && tone !== "soon") return [];
       return [{ component: id, severity: tone === "due" ? "warning" as const : "caution" as const,
-        title: label, explanation: samplePreview ? (percent === null ? "Sample alert. Check the level directly." : `Sample interval: ${percent}% remaining. This is not a finding about your car.`)
-          : recommendation?.explanation ?? `${percent}% of your saved service interval remains. This is a schedule estimate, not a measured condition.` }];
+        title: label, summary: samplePreview ? (percent === null ? "Sample alert · Check the level directly" : `Sample interval · ${percent}% remaining`)
+          : recommendation?.title ?? `${percent}% of your saved service interval remains` }];
     });
   }, [vehicle, records, care, samplePreview]);
   const severity: Severity = loading || !vehicle ? "unknown" : concerns.some((item) => item.severity === "warning")
@@ -149,7 +150,10 @@ export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview
     document.getElementById(`status-detail-${component}`)?.click();
   };
 
-  const hotspots = displayedConcerns.map((concern) => createElement("button", {
+  const exteriorConcerns = displayedConcerns.filter((concern) => concern.component !== "cabin_filter" && concern.component !== "engine_oil_filter");
+  // The cabin photo does not depend on the exterior GLB or its measured bounds.
+  const cabinFilterConcern = interiorAvailable && !loading ? concerns.find((concern) => concern.component === "cabin_filter") : null;
+  const hotspots = exteriorConcerns.map((concern) => createElement("button", {
     key: concern.component,
     type: "button",
     slot: `hotspot-${concern.component}`,
@@ -187,13 +191,19 @@ export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview
         exposure: "1.15",
         "touch-action": "pan-y",
       }, ...hotspots)}
-      {viewMode === "in" && interiorAvailable && <ZoomableInterior src="/images/sonata-interior-illustration.png" alt="Illustrative view of the demo car cabin, looking forward from the rear seat"/>}
+      {viewMode === "in" && interiorAvailable && <ZoomableInterior src="/images/sonata-interior-illustration.png" alt="Illustrative view of the demo car cabin, looking forward from the rear seat" marker={cabinFilterConcern ? {
+        title: cabinFilterConcern.title,
+        severity: cabinFilterConcern.severity,
+        onClick: () => setSelected(cabinFilterConcern),
+      } : undefined}/>}
       {viewMode === "ex" && !modelReady && <span className="status-model-loading">Loading 3D view…</span>}
       {selected && <div className={`status-concern-popover ${selected.severity}`} role="region" aria-label={`${selected.title} summary`}>
         <button className="status-concern-close" type="button" onClick={() => setSelected(null)} aria-label="Close summary">×</button>
         <span className="status-concern-level">{selected.severity === "warning" ? "WARNING" : "CHECK SOON"}</span>
         <strong>{selected.title}</strong>
-        <p>{selected.explanation}</p>
+        {selected.component === "engine_oil" && <p className="status-concern-location">Engine bay service area · The oil filler cap is under the hood.</p>}
+        {selected.component === "cabin_filter" && <p className="status-concern-location">Behind the glove box · Cabin air filter, not an A/C fault diagnosis.</p>}
+        <p>{selected.summary}</p>
         <button className="status-concern-more" type="button" onClick={() => viewDetails(selected.component)}>View details <span aria-hidden="true">↓</span></button>
       </div>}
     </div>

@@ -15,6 +15,11 @@ class ProductVerdict(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+# Clearly unrelated label words can rule a product out even when the model cannot
+# read a washer-fluid label. A brand name alone stays UNKNOWN.
+NON_WASHER_LABEL_TERMS = ("americano", "espresso", "coffee", "cappuccino", "latte")
+
+
 def normalize_label(text: str) -> str:
     return re.sub(r"\s+", "", text).lower()
 
@@ -22,14 +27,13 @@ def normalize_label(text: str) -> str:
 def evaluate_product(
     label_text: str | None, product_class: ProductClass, spec: VehicleSpec
 ) -> ProductVerdict:
+    label = normalize_label(label_text or "")
+    if label and any(normalize_label(term) in label for term in (*spec.forbidden_label_terms, *NON_WASHER_LABEL_TERMS)):
+        return ProductVerdict.CONFLICT
     if product_class in (ProductClass.COOLANT, ProductClass.OIL):
         return ProductVerdict.CONFLICT
     if not label_text or product_class is ProductClass.UNREADABLE:
         return ProductVerdict.UNKNOWN
-
-    label = normalize_label(label_text)
-    if any(normalize_label(term) in label for term in spec.forbidden_label_terms):
-        return ProductVerdict.CONFLICT
 
     has_washer_term = any(normalize_label(term) in label for term in spec.washer_label_terms)
     if product_class is ProductClass.WASHER_FLUID and has_washer_term:

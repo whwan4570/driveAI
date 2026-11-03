@@ -271,10 +271,12 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
     if step is Step.FINISH:
         if _bottle_changed(state, a, spec):
             return _Verdict("regress", "bottle_changed")
-        if finished:
-            return _Verdict("satisfied", key="finished", flow_seen=flow_seen)
         if a.occluded or a.cap_state in (CapState.OCCLUDED, CapState.NOT_VISIBLE):
             return _Verdict("wait", "finish_occluded", wait_reason=WaitReason.OCCLUDED, flow_seen=flow_seen)
+        # The bottle may have been put away before the cap is closed. Once POUR is
+        # complete, a clearly closed cap is the finishing evidence we need.
+        if a.cap_state is CapState.CLOSED:
+            return _Verdict("satisfied", key="finished", flow_seen=flow_seen)
         return _Verdict("not_yet", "finish", flow_seen=flow_seen)
 
     raise ValueError(f"no rule for step {step}")

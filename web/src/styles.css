@@ -272,7 +272,9 @@ h2,h1,p{overflow-wrap:break-word}
 .status-interior-image-viewport{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:zoom-in}
 .status-interior-image-viewport.is-zoomed{cursor:grab}
 .status-interior-image-viewport:active.is-zoomed{cursor:grabbing}
-.status-interior-image-viewport img{display:block;width:100%;height:100%;object-fit:cover;object-position:center 54%;pointer-events:none;user-select:none;transform-origin:center center}
+.status-interior-scene{position:absolute;inset:0;transform-origin:center center}
+.status-interior-image-viewport img{display:block;width:100%;height:100%;object-fit:cover;object-position:center 54%;pointer-events:none;user-select:none}
+.status-interior-scene > .status-interior-hotspot{position:absolute;z-index:1;left:70%;top:48%;transform:translate(-50%,-50%)}
 .status-interior-zoom-controls{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid #d8e5e7;border-radius:10px;background:#fffffff0;box-shadow:0 3px 12px #163b4a18}
 .status-interior-zoom-controls button{min-width:30px;height:30px;padding:0 5px;border:0;border-radius:7px;background:transparent;color:#193243;font-size:17px;font-weight:700;cursor:pointer}
 .status-interior-zoom-controls button[aria-label="Reset zoom"]{min-width:45px;font-size:10px}
@@ -290,6 +292,7 @@ h2,h1,p{overflow-wrap:break-word}
 .status-concern-popover.warning .status-concern-level{color:#ff8a91}
 .status-concern-popover strong{display:block;padding-right:26px;font-size:15px;letter-spacing:-.2px}
 .status-concern-popover p{margin:5px 0 9px;color:#c0d3da;font-size:11px;line-height:1.45}
+.status-concern-popover .status-concern-location{color:#075d66;font-weight:700}
 .status-concern-close{position:absolute;right:9px;top:7px;width:27px;height:27px;border:0;background:transparent;color:#deebee;font-size:22px;line-height:1}
 .status-concern-more{display:flex;align-items:center;gap:6px;padding:0;border:0;background:transparent;color:#82dfe4;font-size:11px;font-weight:800}
 .status-3d-loading{display:grid;place-items:center;height:360px;margin-bottom:13px;border-radius:21px;background:#15384e;color:#bad8dc;font-size:12px}
@@ -413,12 +416,14 @@ h2,h1,p{overflow-wrap:break-word}
 .status-health-led,.status-health-light.clear .status-health-led,.status-health-light.caution .status-health-led,.status-health-light.warning .status-health-led{box-shadow:none}
 .status-model-stage{height:280px}
 .status-model-loading{color:#708895}
-.status-concern-popover{border:1px solid #e9cd90;background:rgba(255,255,255,.78);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#193243;box-shadow:0 5px 18px #19324314}
+.status-concern-popover{right:auto;width:min(310px,calc(100% - 76px));max-height:calc(100% - 80px);border:1px solid #dbb762;background:#fff;-webkit-backdrop-filter:none;backdrop-filter:none;color:#142f3b;box-shadow:0 10px 28px #19324332}
 .status-concern-popover.warning{border-color:#e7a1a4}
-.status-concern-popover strong{color:#193243}
-.status-concern-popover p{color:#56707d}
+.status-concern-popover strong{color:#142f3b}
+.status-concern-popover p{color:#294955}
 .status-concern-popover .status-concern-level{color:#94621b}
 .status-concern-popover.warning .status-concern-level{color:#a64249}
+.status-concern-close{color:#294955}
+.status-concern-more{color:#006f79}
 .status-concern-close{color:#536b79}
 .status-concern-more{color:#087f89}
 .status-mileage-card{border:1px solid #dfe8eb;border-radius:14px;background:#fff;color:#193243;box-shadow:none}
@@ -886,6 +891,19 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .arw-voice{display:flex;align-items:center;gap:10px;color:var(--k-text-3);font-size:13px}
 .arw-tire-guide{position:absolute;left:50%;top:44%;width:74%;aspect-ratio:1;transform:translate(-50%,-50%);border:3px dashed #ffffffd9;border-radius:50%;box-shadow:0 0 0 9999px #00000052}
 .arw-tire-guide span{position:absolute;left:50%;top:-38px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000000b3;font-size:13px;font-weight:700;white-space:nowrap}
+.tire-camera-target{position:absolute;left:50%;top:46%;width:min(66vw,280px);aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 100vmax #0005;pointer-events:none}
+.tire-camera-target.tread{width:min(78vw,330px);aspect-ratio:1.35;border-radius:34px}
+.tire-camera-target.gauge{width:min(72vw,300px);aspect-ratio:1.5;border-radius:24px}
+.tire-camera-target span{position:absolute;left:50%;top:-38px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000b;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+.tire-route{position:absolute;z-index:5;top:calc(84px + env(safe-area-inset-top));right:12px;display:grid;grid-template-columns:36px 42px 36px;grid-template-rows:46px 46px;gap:6px;align-items:center;padding:8px;border-radius:18px;background:#071b26bb;box-shadow:0 4px 20px #0004;color:#fff}
+.tire-route-car{grid-column:2;grid-row:1/3;align-self:stretch;display:grid;place-items:center;border:2px solid #fff8;border-radius:12px;font-size:9px;font-weight:800;line-height:1.45;text-align:center;letter-spacing:.04em}
+.tire-route-wheel{display:flex;flex-direction:column;align-items:center;justify-content:center;width:36px;height:42px;border:1px solid #fff8;border-radius:10px;background:#fff2;color:#fff9;font-size:15px;font-weight:800;line-height:1}
+.tire-route-wheel small{margin-top:3px;font-size:9px}.tire-route-wheel.active{border-color:#fff;background:#00848d;color:#fff;box-shadow:0 0 0 3px #5fe2e777}.tire-route-wheel.checked{background:#145c60;color:#fff}
+.tire-route-wheel.wheel-0{grid-column:1;grid-row:1}.tire-route-wheel.wheel-1{grid-column:1;grid-row:2}.tire-route-wheel.wheel-2{grid-column:3;grid-row:1}.tire-route-wheel.wheel-3{grid-column:3;grid-row:2}
+.tire-guide-card{max-height:35svh}.tire-guide-card p{min-height:21px}.tire-guide-summary{max-height:70svh;gap:12px}.tire-result-tone{align-self:flex-start;padding:5px 10px;border-radius:999px;background:#e5f5f4;color:#067b7c;font-size:12px;font-weight:800}.tire-result-tone.soon{background:#fff2d8;color:#926008}.tire-result-tone.warning{background:#ffe9e5;color:#b83024}
+.tire-wheel-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tire-wheel-result{display:grid;gap:5px;min-width:0;padding:10px;border:1px solid #dce7e8;border-radius:12px;background:#f7f9f9;color:#193647}.tire-wheel-result strong{font-size:13px}.tire-wheel-result>span{font-size:11px;line-height:1.35;color:#607582}.tire-wheel-result>div{display:flex;gap:4px}.tire-wheel-result img{width:calc(50% - 2px);height:48px;border-radius:6px;object-fit:cover}.tire-wheel-result label{display:grid;gap:3px;font-size:11px;color:#607582}.tire-wheel-result input{width:100%;min-width:0;height:34px;padding:5px 7px;border:1px solid #d6e3e5;border-radius:7px;background:#fff;color:#193647;font:inherit;font-size:13px}.tire-measure-note{font-size:12px!important}
+.tire-gauge-action{min-height:36px;padding:6px;border:1px solid #a2ced0;border-radius:8px;background:#eaf7f6;color:#006f78;font:inherit;font-size:11px;font-weight:700}.tire-gauge-preview{display:block;max-width:100%;max-height:110px;border-radius:8px;object-fit:contain}.tire-guide-card p strong{color:#173448}
+@media (max-height:700px){.tire-route{top:70px;transform:scale(.82);transform-origin:top right}.tire-guide-card{max-height:42svh}}
 .arw .k-form label{color:var(--k-text-2)}
 .arw-card>.arw-primary,.arw-card>.arw-secondary{flex:none;width:100%}
 /* iOS Safari draws date fields with its own height, minimum width and centered text; keep them like the other fields. */
@@ -938,3 +956,10 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .arw-evidence{position:absolute;z-index:8;top:calc(150px + env(safe-area-inset-top));left:14px;right:14px;max-width:380px;margin:auto;padding:16px;border-radius:14px;background:#fff;color:#173447;box-shadow:0 8px 24px #001d1b40}.arw-evidence p{margin:8px 0;font-size:14px}.arw-evidence small{color:#516d78}
 .arw-label-guide{position:absolute;left:8%;right:8%;top:13%;height:40%;border:3px solid #ffffffd9;border-radius:18px;box-shadow:0 0 0 9999px #00000040;pointer-events:none}
 .arw-label-guide span{position:absolute;left:50%;top:10px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000000b3;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+/* Tire guide: the outline follows the box from the last checked frame and disappears once the phone moves. */
+.tire-outline{position:absolute;z-index:3;border:3px solid #ffb020;border-radius:18px;box-shadow:0 0 0 3px #0005;pointer-events:none}
+.tire-outline span{position:absolute;left:50%;top:-34px;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:#000b;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+.tire-looking{position:absolute;z-index:3;left:50%;top:44%;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:#000b;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+.tire-wheel-result>.tire-not-measured{color:#8a5a00;font-weight:600}
+.tire-wheel-result>.tire-measured{color:#0b6b4f;font-weight:600}
+

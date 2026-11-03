@@ -47,8 +47,11 @@ class MetaSparkClient:
     async def analyze(
         self, frames: Sequence[bytes], step: Step | None, reference: bytes | None = None
     ) -> SceneAnswer:
-        prompt = build_scene_prompt(step, has_reference=reference is not None)
-        images = [reference, *frames] if reference is not None else list(frames)
+        # The previous engine-bay frame distracts label OCR. A reference is only useful when
+        # comparing the cap's earlier state with the current view.
+        use_reference = reference is not None and step in (Step.OPEN_CAP, Step.FINISH)
+        prompt = build_scene_prompt(step, has_reference=use_reference)
+        images = [reference, *frames] if use_reference else list(frames)
         raw = await self._vision_request(prompt, images, reasoning_effort=self.settings.spark_reasoning_effort or None)
         return parse_scene_answer(raw, fields_for(step))
 
