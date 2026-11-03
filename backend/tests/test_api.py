@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime, timedelta, timezone
 
@@ -134,6 +135,29 @@ def test_transient_vision_failure_retries_before_evaluating_transition():
     assert result["session"]["step"] == "OPEN_CAP"
     assert result["transition_event"]["sequence_ids"] == [1, 2]
     assert client.get("/health").json()["vision_status"] == "ready"
+
+
+def test_slow_vision_failure_is_not_retried_past_the_timeout():
+    class SlowUnavailable(HappyPathSpark):
+        calls = 0
+
+        async def analyze(self, frames, step, reference=None):
+            self.calls += 1
+            await asyncio.sleep(0.3)
+            request = httpx.Request("POST", "https://example.test/vision")
+            raise httpx.HTTPStatusError("unavailable", request=request, response=httpx.Response(503, request=request))
+
+    spark = SlowUnavailable()
+    # 0.3s used of 1.2s leaves less than the 1s a retry needs.
+    client = TestClient(create_app(Settings(spark_timeout_s=1.2), spark=spark))
+    vid = client.post("/vehicles", json={"spec_id": "demo", "year": 2021}).json()["vehicle_id"]
+    sid = client.post("/sessions", json={"vehicle_id": vid}).json()["session"]["session_id"]
+
+    result = client.post(f"/sessions/{sid}/observations", json=windows(1)).json()
+
+    assert spark.calls == 2
+    assert result["transition_reason"] == "model_error"
+    assert result["session"]["step"] == "FIND_INLET"
 
 
 def test_non_retryable_vision_failure_does_not_advance():

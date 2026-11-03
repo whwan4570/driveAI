@@ -766,26 +766,27 @@ def create_app(
         decoded = [[base64.b64decode(f.jpeg_base64) for f in w.frames] for w in windows]
 
         async def analyze(frames: list[bytes]) -> tuple[SceneAnswer | None, str | None]:
+            # Both attempts share one timeout so a retry cannot outlast the browser's 30-second limit.
+            deadline = time.monotonic() + settings.spark_timeout_s
             for attempt in range(2):
                 try:
                     answer = await asyncio.wait_for(
-                        spark.analyze(frames, snapshot.step, reference), settings.spark_timeout_s
+                        spark.analyze(frames, snapshot.step, reference), max(deadline - time.monotonic(), 0.1)
                     )
                     return answer, None
                 except httpx.HTTPStatusError as exc:
                     status = exc.response.status_code
-                    if attempt == 0 and (status == 429 or 500 <= status < 600):
+                    if attempt == 0 and (status == 429 or 500 <= status < 600) and deadline - time.monotonic() > 1:
                         _carmori_log.warning("Vision request returned HTTP %d; retrying once", status)
                         await asyncio.sleep(0.25)
                         continue
                     _carmori_log.warning("Vision request failed with HTTP %d", status)
                     return None, "model_billing_required" if status == 402 else "model_unauthorized" if status in (401, 403) else "model_error"
                 except (httpx.TimeoutException, asyncio.TimeoutError):
-                    # A second full timeout could outlast the browser's 30-second request limit.
                     _carmori_log.warning("Vision request timed out")
                     return None, "model_error"
                 except httpx.TransportError as exc:
-                    if attempt == 0:
+                    if attempt == 0 and deadline - time.monotonic() > 1:
                         _carmori_log.warning("Vision transport error (%s); retrying once", type(exc).__name__)
                         await asyncio.sleep(0.25)
                         continue

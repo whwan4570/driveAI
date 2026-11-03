@@ -211,7 +211,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !cameraAvailable || session || roiSelected || visionStatus === "billing_required" || visionStatus === "unauthorized") return;
+    // Demo Mode has no photo checks, so the inlet is tapped instead of searched.
+    if (!video || !cameraAvailable || session || roiSelected || demoMode || visionStatus === "billing_required" || visionStatus === "unauthorized") return;
     let cancelled = false;
     let timer: number | undefined;
     let lastFrame: Uint8Array | null = null;
@@ -233,21 +234,25 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       if (previousFrame && difference(frame, previousFrame) < 4) stable++; else stable = 0;
       previousFrame = frame;
       if (stable < 3 || performance.now() - lastAttempt < 4000) return;
-      if (lastFrame && difference(frame, lastFrame) < 8 && !hintRoiRef.current) return;
+      // A still view is searched once per crop: the full frame, then the lower left and right.
+      // After a full pass, wait until the view changes (or the user taps) before searching again.
+      if (!lastFrame || difference(frame, lastFrame) >= 8) scanIndex = 0;
+      else if (scanIndex >= INLET_SEARCH_ROIS.length && !hintRoiRef.current) return;
+      const fromHint = hintRoiRef.current !== null;
       running = true;
       lastAttempt = performance.now();
       lastFrame = frame;
       setSearchingInlet(true);
       setError(null);
       try {
-        const searchRoi = hintRoiRef.current ?? INLET_SEARCH_ROIS[scanIndex++ % INLET_SEARCH_ROIS.length];
+        const searchRoi = hintRoiRef.current ?? INLET_SEARCH_ROIS[Math.min(scanIndex++, INLET_SEARCH_ROIS.length - 1)];
         hintRoiRef.current = null;
         const candidate = await api.analyzeInspection(vehicleId, { component: "washer_fluid", photo_type: "engine_candidate", jpeg_base64: grabJpeg(video, searchRoi, 1920, 0.85) });
         if (cancelled) return;
         if (difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
         if (candidate.status === "unavailable") { setError(candidate.observation); setSearchFinished(true); return; }
         const box = candidate.box ? boxInFullFrame(candidate.box, searchRoi) : null;
-        if (!box) { setCandidatePoint(null); setInspection(candidate); setSearchFinished(true); return; }
+        if (!box) { setCandidatePoint(null); setInspection(candidate); setSearchFinished(fromHint || scanIndex >= INLET_SEARCH_ROIS.length); return; }
         const point = { x: (box[0] + box[2]) / 2, y: (box[1] + box[3]) / 2 };
         setCandidatePoint(point);
         setInspection({ ...candidate, observation: "Checking the highlighted area. Hold still." });
@@ -301,14 +306,27 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       }
     };
     timer = window.setInterval(() => { void tick(); }, 500);
-    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [vehicleId, cameraAvailable, session, roiSelected, visionStatus, searchAttempt]);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearInterval(timer);
+      // A cancelled search skips its own reset, e.g. when Demo Mode turns on mid-request.
+      setSearchingInlet(false);
+    };
+  }, [vehicleId, cameraAvailable, session, roiSelected, demoMode, visionStatus, searchAttempt]);
 
   const pickRoi = (e: MouseEvent<HTMLDivElement>) => {
     if (session) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.min(1, Math.max(0, cover ? (e.clientX - rect.left + cover.offsetX) / cover.width : (e.clientX - rect.left) / rect.width));
     const y = Math.min(1, Math.max(0, cover ? (e.clientY - rect.top + cover.offsetY) / cover.height : (e.clientY - rect.top) / rect.height));
+    if (demoMode) {
+      // Nothing can verify a tap in Demo Mode; the tapped point marks the inlet directly.
+      roiRef.current = roiAround(x, y);
+      roiSelectedRef.current = true;
+      setInletPoint({ x, y });
+      setRoiSelected(true);
+      return;
+    }
     hintRoiRef.current = roiAround(x, y);
     setCandidatePoint(null);
     setInspection(null);
@@ -368,7 +386,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     const video = videoRef.current;
     if (!video || starting) return;
     if (!video.videoWidth) { setError("A live camera is needed for hands-free guidance. Allow camera access and try again."); return; }
-    if (!roiSelected || inspection?.status !== "located") { setError("First locate the inlet with a photo or tap the washer cap in the live view."); return; }
+    if (!roiSelected || (!demoMode && inspection?.status !== "located")) { setError("First locate the inlet with a photo or tap the washer cap in the live view."); return; }
     setStarting(true);
     setError(null);
     try {
@@ -445,8 +463,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   });
 
   useEffect(() => {
-    if (roiSelected && inspection?.status === "located" && !session && !starting) void start();
-  }, [roiSelected, inspection, session]);
+    if (roiSelected && (demoMode || inspection?.status === "located") && !session && !starting) void start();
+  }, [roiSelected, inspection, session, demoMode]);
 
   const located = inspection?.status === "located" && inspection.box
     ? { x: (inspection.box[0] + inspection.box[2]) / 2, y: (inspection.box[1] + inspection.box[3]) / 2 } : null;
@@ -533,7 +551,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         </> : <>
           <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
           <h1>{anchor ? "Washer cap found" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
-          <p>{anchor ? "Starting the guide…" : "Show the whole engine bay. I’ll find the washer cap."}</p>
+          <p>{anchor ? "Starting the guide…" : demoMode ? "Tap the washer cap to start the demo." : "Show the whole engine bay. I’ll find the washer cap."}</p>
           {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {inspection?.status === "uncertain" ? ` · ${inspection.observation}` : ""}</p>}
           {inspection && !searchingInlet && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
           {searchFinished && !anchor && <p className="arw-note">Move the phone to search again.</p>}

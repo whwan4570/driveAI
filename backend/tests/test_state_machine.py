@@ -279,6 +279,18 @@ def test_finish_records_when_cap_closes_after_bottle_leaves_view():
     assert result.completion.completion_source is CompletionSource.OBSERVED_SEQUENCE
 
 
+def test_closed_cap_does_not_finish_while_still_pouring():
+    d = at_pour()
+    d.obs(POUR_FLOW)
+    d.obs(POUR_FLOW)
+    # A nozzle in the neck can read as a closed cap. The pour scene must be over first.
+    misread = SceneAnswer(cap_state=CapState.CLOSED, bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES)
+    d.obs(misread)
+    result = d.obs(misread)
+    assert d.state.step is Step.FINISH
+    assert result.completion is None
+
+
 def test_unseen_pour_still_needs_confirmation_after_cap_closes():
     d = at_pour()
     tilt = SceneAnswer(bottle_over_inlet=Tri.YES, bottle_tilted=Tri.YES, flow_visible=Tri.UNCLEAR)

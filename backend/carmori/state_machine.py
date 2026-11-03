@@ -273,9 +273,11 @@ def _judge(state: SessionState, a: SceneAnswer, spec: VehicleSpec) -> _Verdict:
             return _Verdict("regress", "bottle_changed")
         if a.occluded or a.cap_state in (CapState.OCCLUDED, CapState.NOT_VISIBLE):
             return _Verdict("wait", "finish_occluded", wait_reason=WaitReason.OCCLUDED, flow_seen=flow_seen)
-        # The bottle may have been put away before the cap is closed. Once POUR is
-        # complete, a clearly closed cap is the finishing evidence we need.
-        if a.cap_state is CapState.CLOSED:
+        # The bottle may have been put away before the cap is closed, so it need not be
+        # upright in view. A closed cap only counts when nothing still looks like pouring:
+        # a nozzle sitting in the neck can be misread as a closed cap.
+        still_pouring = Tri.YES in (a.bottle_over_inlet, a.bottle_tilted, a.flow_visible)
+        if a.cap_state is CapState.CLOSED and not still_pouring:
             return _Verdict("satisfied", key="finished", flow_seen=flow_seen)
         return _Verdict("not_yet", "finish", flow_seen=flow_seen)
 
