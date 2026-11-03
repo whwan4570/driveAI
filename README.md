@@ -1,10 +1,31 @@
 # Carmori
 
-**Carmori remembers your car and helps you work on it.** It briefs you in the car and answers questions from your own records. Then it watches through a mounted phone camera while you refill washer fluid, moves to the next step without a tap, and saves what it actually saw.
+**Your car's memory, guide, and AI companion.**
+
+Car ownership is more than driving. Maintenance history lives in receipts, warnings in the dashboard, instructions in a manual, and the next task on a to-do list. Carmori brings those fragmented moments together so owners can **understand their car, get help while doing the work, and keep a trustworthy record of what happened**.
+
+Our long-term vision is an AI companion for **the car you actually own**, not a generic chatbot or another maintenance reminder app. Carmori should recognize the vehicle and its context, remember its history and the owner's preferences, make everyday driving and care easier, and eventually guide people directly over real vehicle components through spatial augmented reality.
+
+### The ownership experience we want to build
+
+| Pillar | Long-term experience |
+| --- | --- |
+| **Vehicle Memory** | One evolving history of mileage, service receipts, photos, repairs, oil changes, washes, vehicle documents, and owner preferences. |
+| **Proactive Companion** | Briefings and conversational answers grounded in vehicle history, maintenance schedules, weather, and relevant driving context. |
+| **Visual & AR Garage** | Camera-guided care today; component-aware, spatially anchored instructions on the real car as recognition and tracking mature. |
+| **Everyday Discover** | Useful services, parking memories, nearby stops, and suggestions that relate to the owner's vehicle and routine. |
+
+The intended loop is **Know the car → Understand the need → Guide the action → Remember the result**. The experience should become more useful as the vehicle's memory grows.
+
+### Why a washer-fluid refill for a three-minute demo?
+
+A fully generalized automotive assistant would require vehicle-specific data across many models, robust real-world perception, calibrated 3D geometry, spatial tracking, and extensive safety validation. Those systems cannot all be built and validated in a short hackathon.
+
+We chose **one complete, hands-free care journey** on a **2014 Hyundai Sonata** instead: a useful briefing, a grounded question, a camera-guided refill, and an answer that uses the newly saved record. This scenario makes the connection between **vision, voice, workflow decisions, and long-term memory** visible within three minutes.
 
 **Brief → Ask → Inspect → Refill → Remember**
 
-Built for the Meta Global AI Developer Hackathon 2026 with Muse Spark 1.3, Muse Voice Transcribe 1.0 and SAM 3.1. The demo car is a 2014 Hyundai Sonata.
+Built for the Meta Global AI Developer Hackathon 2026. The prototype combines **Muse Spark 1.3**, **Muse Voice Transcribe 1.0**, and a **SAM 3.1** tracking endpoint with a FastAPI backend and vehicle-specific guidance. **SAM 3D Objects and fully spatial vehicle AR are future extensions**, not capabilities demonstrated by the current refill flow.
 
 ---
 
@@ -20,6 +41,17 @@ Built for the Meta Global AI Developer Hackathon 2026 with Muse Spark 1.3, Muse 
 | **Places** | Nearby washer-fluid shops and car washes, the parked-car spot and a Find my car compass view. |
 | **History / Documents** | User-confirmed maintenance records with photos, plus vehicle documents. |
 | **In the car** | In the iOS and Android shells, the briefing can start when CarPlay or Android Auto connects. |
+
+## How the Meta AI components fit together
+
+| Component | Responsibility in Carmori | Scope in this prototype |
+| --- | --- | --- |
+| **Muse Spark 1.3** | Interpret camera observations and maintenance photos; support contextual, grounded responses. | Short two-frame windows and image checks feed backend validation rules. |
+| **Muse Voice Transcribe 1.0** | Convert spoken questions or requests into input the assistant can act on. | Voice transcription is integrated with a browser/optional voice-service path; voice alone never certifies a safety-critical visual step. |
+| **SAM 3.1** | Segment and track selected objects such as the cap, bottle, or washer inlet across a video clip. | The backend provides a short-clip mask/tracking endpoint. Clip-level tracking is not yet connected to continuous, anchored AR overlays in the refill screen. |
+| **Carmori backend and vehicle memory** | Determine workflow transitions, reject unsafe or unsupported conclusions, store evidence-backed maintenance records. | FastAPI state machine, vehicle-specific owner-manual guidance, records, and replay tests. |
+
+**Why separate model perception from workflow decisions?** A visual model can describe what it sees, but maintenance actions need predictable guardrails. Carmori requires agreeing observations, waits when the view is blocked, rejects the wrong product, and records whether an action was visually observed or confirmed by the user. The model provides observations; application logic controls progression.
 
 ### How the hands-free refill decides
 
@@ -42,6 +74,10 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 
 ## Demo (3 minutes)
 
+This is a **vertical slice of the longer-term Carmori experience**, not a claim that every vehicle or maintenance task is supported today. The story starts with what the car knows, moves into a physical task, and ends with a new memory the assistant can recall.
+
+**What to watch for:** the assistant grounds its advice in records; visual observations inform a hands-free task; a deterministic controller validates progression; and the final answer reflects the saved maintenance event. A supported Meta-backed run and a clearly labeled Demo Mode are distinct execution paths.
+
 ### Before you start
 
 - Engine off and cool, hood open, car parked.
@@ -63,6 +99,28 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 | 2:25–3:00 | Back in the car, ask "What did I do today?" | The answer uses the new record. |
 
 **If something goes wrong on stage:** cover the cap with your hand. Carmori waits and says the view is blocked, then resumes on the same step. Showing this on purpose is a good way to show the safety rules.
+
+---
+
+## Why this prototype is scoped this way
+
+The three-minute format pushed us to prioritize **an end-to-end interaction that can be explained and tested** rather than a broad collection of unfinished experiences.
+
+- **Vehicle-specific first:** We use a 2014 Hyundai Sonata and its owner's manual so task instructions can be checked against a concrete car. Extending the same quality to many models requires more verified vehicle data.
+- **Camera guidance before spatial AR:** The current inlet cue is a **2D camera-view overlay in a fixed-phone setup**, not a marker tracked in world coordinates. Stable component-anchored AR requires vehicle pose estimation, camera calibration, tracking across viewpoints, and safety testing.
+- **Perception before fully automatic scene understanding:** Muse Spark analyzes observation windows; SAM 3.1 exposes clip segmentation/tracking. Continuous low-latency tracking and precise AR registration need additional integration and evaluation.
+- **Reliable transitions before unlimited autonomy:** A state machine decides the next step from model observations and rules. The system explicitly handles uncertain frames, incompatible products, and late responses rather than treating every model output as an instruction.
+- **Evidence before claims:** Replay tests cover scripted edge cases. Real-car accuracy, timing, and mount robustness are **not yet proven** and require the documented real-clip test set. Simulated step checks are identified as **Demo Mode** when used.
+
+This lets the demo illustrate the desired user experience while keeping its technical boundaries inspectable. The aim is to build toward real-world reliability, not to imply that an unvalidated function is already production-ready.
+
+### Next engineering milestones
+
+1. **Real-car validation:** Measure recognition accuracy, latency, false transitions, and performance under varying light, occlusion, and camera angle.
+2. **Spatial AR Garage:** Combine segmentation and component recognition with vehicle pose estimation and ARKit/ARCore anchors so instructions can follow the actual vehicle.
+3. **Richer vehicle visualization:** Explore prebuilt vehicle assets and **SAM 3D Objects** for car representations; do not confuse 3D asset generation with real-world spatial registration.
+4. **More vehicles and tasks:** Add vehicle-specific manuals, workflows, and validated safety checks beyond the initial Sonata refill.
+5. **Deeper ownership memory:** Link maintenance, documents, trip context, personalized care, and the proactive companion into one continuous experience.
 
 ---
 
@@ -188,7 +246,7 @@ docs/              design notes and the real-clip test set
 
 ---
 
-## Limits
+## Current prototype limitations
 
 - **Real-world accuracy is not proven yet.** The replay clips are scripted. Step accuracy, delay and mount position still need the real-clip test set and full runs on the car.
 - Photo checks (inlet, label, tire) take several seconds each. Live step checks depend on network and model speed.
