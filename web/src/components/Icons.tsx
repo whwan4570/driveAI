@@ -2,6 +2,7 @@ import type { ReactNode, SVGProps } from "react";
 
 export type IconName =
   | "car" | "home" | "status" | "assistant" | "inspect" | "history" | "washer"
+  | "activity" | "scan" | "folder" | "fuel" | "wrench" | "bag" | "book" | "files" | "list" | "droplets" | "tire" | "filter" | "layers" | "wind" | "droplet" | "vent" | "zap" | "thermometer"
   | "calendar" | "cloud" | "mic" | "play" | "pause" | "close" | "plus"
   | "arrow" | "check" | "camera" | "volume" | "spark" | "eye"
   | "refresh" | "bell" | "shield" | "chevron" | "file" | "menu" | "profile" | "settings" | "pin" | "navigation";
@@ -9,6 +10,24 @@ export type IconName =
 export function Icon({ name, size = 24, ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number }) {
   const shared = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const, ...props };
   const paths: Record<IconName, ReactNode> = {
+    activity: <path d="M2 12h4l3-9 5 18 3-9h5"/>,
+    scan: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3M7 12h10"/></>,
+    folder: <path d="M3 9V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v2M3 9h18l-3 11H3a1 1 0 0 1-1-1V9Z"/>,
+    fuel: <><path d="M3 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M2 21h12M3 10h10m0 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 4 0V9l-4-4"/><circle cx="20" cy="9" r="1"/></>,
+    wrench: <path d="M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-4 4-4-4 4-4Z"/>,
+    bag: <><path d="M4 7h16l1 14H3L4 7Zm0 0 3-4h10l3 4M8 10a4 4 0 0 0 8 0"/></>,
+    book: <><path d="M12 5v16M12 5C9 2 5 3 2 3v16c4 0 7-1 10 2 3-3 6-2 10-2V3c-4 0-7-1-10 2Z"/></>,
+    files: <><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-5ZM14 2v6h6M3 6v14a2 2 0 0 0 2 2h11"/></>,
+    list: <><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></>,
+    droplets: <><path d="M7 3c0 4-5 5-5 9a5 5 0 0 0 10 0c0-3-3-5-5-9ZM16 3c1 4 6 6 6 10a6 6 0 0 1-8 6"/></>,
+    tire: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1"/></>,
+    filter: <path d="M3 3h18l-7 9v8l-4-2v-6L3 3Z"/>,
+    layers: <><path d="m12 3 10 5-10 5L2 8l10-5ZM2 12l10 5 10-5M2 16l10 5 10-5"/></>,
+    wind: <><path d="M3 8h12a3 3 0 1 0-3-3M2 12h17a3 3 0 1 1-3 3M4 16h5a3 3 0 1 1-3 3"/></>,
+    droplet: <path d="M12 2C9 7 4 10 4 15a8 8 0 0 0 16 0c0-5-5-8-8-13Z"/>,
+    vent: <><rect x="3" y="3" width="18" height="7" rx="2"/><path d="M6 6h12M8 13v6a2 2 0 0 1-4 0m8-6v9m4-9v3a2 2 0 0 0 4 0"/></>,
+    zap: <path d="m13 2-10 12h8l-1 8 11-12h-8l1-8Z"/>,
+    thermometer: <><path d="M9 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0Z"/><path d="M12 8v10"/></>,
     car: <><path d="M4 11 6 5.8A2 2 0 0 1 7.9 4.5h8.2A2 2 0 0 1 18 5.8L20 11"/><path d="M3.5 11h17v7a1 1 0 0 1-1 1h-2v-2h-11v2h-2a1 1 0 0 1-1-1v-7Z"/><path d="M3.5 12.2 6.5 13m14-0.8-3 0.8M7 15h1m8 0h1"/></>,
     home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z"/></>,
     status: <><path d="M4.1 18a9 9 0 1 1 15.8 0H4.1Z"/><path d="M12 14.5 16.5 9M7 15h.01M12 7h.01M17 15h.01"/><circle cx="12" cy="14.5" r="1"/></>,

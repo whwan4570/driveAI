@@ -80,7 +80,7 @@ export function HistorySummary({ vehicle, issues, issuesLoading, issuesAvailable
   return <div className="history-summary">
     <section className="relationship-card" aria-label="Your time with this vehicle">
       <div className="relationship-metric">
-        <div className="relationship-card-top"><h1>Days together</h1><button type="button" onClick={onEditVehicle}>{vehicle?.purchased_on ? "Edit dates" : "Add dates"}</button></div>
+        <div className="relationship-card-top"><h2>Days together</h2><button type="button" onClick={onEditVehicle}>{vehicle?.purchased_on ? "Edit dates" : "Add dates"}</button></div>
         <strong className="relationship-count">{togetherDays === null ? "—" : togetherDays.toLocaleString()}<span>{togetherDays === null ? "" : " days"}</span></strong>
         <p>{vehicle?.purchased_on ? `Since you bought this car on ${formatVehicleDate(vehicle.purchased_on)}` : appStart ? `Since you added this car to Carmori on ${formatVehicleDate(appStart)}` : "Add a date to start the count."}</p>
         {vehicle?.first_drive_on ? <p className="relationship-secondary">First drove it on {formatVehicleDate(vehicle.first_drive_on)}</p>

@@ -61,7 +61,7 @@ function paintColor(name: string | null | undefined): string {
   return "#aeb8c1";
 }
 
-export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview = false, showHeader = true }: {
+export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview = false, showHeader = true, onViewDetails }: {
   vehicle: Vehicle | null;
   records: MaintenanceRecord[];
   care: CareResponse | null;
@@ -69,6 +69,7 @@ export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview
   samplePreview?: boolean;
   /** The Status page already shows the car name and review count above this card. */
   showHeader?: boolean;
+  onViewDetails?: (component: string) => void;
 }) {
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const [selected, setSelected] = useState<Concern | null>(null);
@@ -147,6 +148,7 @@ export function StatusVehicle3D({ vehicle, records, care, loading, samplePreview
 
   const viewDetails = (component: Concern["component"]) => {
     setSelected(null);
+    if (onViewDetails) { onViewDetails(component); return; }
     document.getElementById(`status-detail-${component}`)?.click();
   };
 

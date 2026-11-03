@@ -5,11 +5,12 @@ import { VehicleConfigurationFields, inferredCivicBodyStyle, isCivic, type BodyS
 import { api, type Vehicle } from "../lib/api";
 import { formatVehicleDate, localDateISO, todayLocalISO } from "../lib/vehicleDates";
 
-export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
+export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel, backLabel = "Back" }: {
   vehicle: Vehicle;
   hasMajorIssues: boolean;
   onSaved: (updated: Vehicle) => void;
   onCancel: () => void;
+  backLabel?: string;
 }) {
   const [make, setMake] = useState(vehicle.make ?? "");
   const [model, setModel] = useState(vehicle.model ?? "");
@@ -60,6 +61,7 @@ export function VehicleEditor({ vehicle, hasMajorIssues, onSaved, onCancel }: {
   };
 
   return <div className="vehicle-editor k-home">
+    <button className="context-back" type="button" onClick={onCancel} disabled={saving}>‹ {backLabel}</button>
     <header className="k-hero"><h1 className="k-title">Edit vehicle</h1><p className="k-lead">Keep care suggestions grounded in current details.</p></header>
     <form className="setup-form k-form k-sheet" onSubmit={(event) => void save(event)}>
       <VehiclePicker make={make} model={model} year={Number(year) || null} onChange={(next) => { setMake(next.make); setModel(next.model); setBodyStyle(inferredCivicBodyStyle(next.model)); setTrim(""); }}/>

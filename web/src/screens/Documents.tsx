@@ -8,18 +8,19 @@ import { formatVehicleDate } from "../lib/vehicleDates";
 
 const MAX_FILE_BYTES = 8_000_000;
 
-export function Documents({ vehicleId, records, storageError, onChanged, onBack }: {
+export function Documents({ vehicleId, records, storageError, onChanged, onBack, initialKind }: {
   vehicleId: string;
   records: SavedDocument[];
   storageError: string | null;
   onChanged: () => Promise<void>;
   onBack: () => void;
+  initialKind?: DocumentKind;
 }) {
-  const [editing, setEditing] = useState<DocumentKind | null>(null);
-  const [viewing, setViewing] = useState<DocumentKind | null>(null);
+  const [editing, setEditing] = useState<DocumentKind | null>(() => initialKind && !records.find((r) => r.kind === initialKind)?.file ? initialKind : null);
+  const [viewing, setViewing] = useState<DocumentKind | null>(() => initialKind && records.find((r) => r.kind === initialKind)?.file ? initialKind : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [expiresOn, setExpiresOn] = useState("");
-  const [remindDays, setRemindDays] = useState<7 | 30 | 60>(30);
+  const [expiresOn, setExpiresOn] = useState(() => records.find((r) => r.kind === initialKind)?.expiresOn ?? "");
+  const [remindDays, setRemindDays] = useState<7 | 30 | 60>(() => records.find((r) => r.kind === initialKind)?.remindDays ?? 30);
   const [file, setFile] = useState<File | null>(null);
   const [removeExistingFile, setRemoveExistingFile] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -105,7 +106,7 @@ export function Documents({ vehicleId, records, storageError, onChanged, onBack 
     <section className="document-access" aria-label="Quick access to driving documents">
       <div><Icon name="file" size={20}/><strong>Quick access</strong></div>
       <p>Open the requested document when stopped. Keep originals where your location requires them.</p>
-      <div className="document-access-buttons">{DOCUMENT_KINDS.filter((item) => item.kind !== "sticker").map((item) => {
+      <div className="document-access-buttons">{DOCUMENT_KINDS.filter((item) => ["license", "registration", "insurance"].includes(item.kind)).map((item) => {
         const saved = records.find((record) => record.kind === item.kind);
         return <button type="button" key={item.kind} onClick={() => view(item.kind)}><span>{item.shortLabel}</span><small>{saved?.file ? "View copy" : "Add copy"}</small></button>;
       })}</div>

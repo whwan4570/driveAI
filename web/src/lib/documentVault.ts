@@ -1,12 +1,14 @@
 import { todayLocalISO } from "./vehicleDates";
 
-export type DocumentKind = "license" | "registration" | "insurance" | "sticker";
+export type DocumentKind = "license" | "registration" | "insurance" | "sticker" | "purchase" | "receipt";
 
 export const DOCUMENT_KINDS: { kind: DocumentKind; label: string; shortLabel: string }[] = [
   { kind: "license", label: "Driver license", shortLabel: "License" },
   { kind: "registration", label: "Vehicle registration", shortLabel: "Registration" },
   { kind: "insurance", label: "Insurance card", shortLabel: "Insurance" },
   { kind: "sticker", label: "Registration sticker", shortLabel: "Sticker" },
+  { kind: "purchase", label: "Purchase document", shortLabel: "Purchase" },
+  { kind: "receipt", label: "Service receipt", shortLabel: "Receipt" },
 ];
 
 export type SavedDocument = {
