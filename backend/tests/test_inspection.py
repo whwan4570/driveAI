@@ -207,3 +207,21 @@ def test_tire_view_needs_quality_and_an_unusable_box_only_loses_the_outline():
     pixels = tire_reply('{"view_valid":true,"confidence":"high","view_quality":"good","tire_box":[100,100,900,900],"findings":[]}')
     assert pixels.status == "located" and pixels.tire_box is None
 
+
+
+def test_inlet_candidate_never_confirms_cap_and_rejects_invalid_box():
+    class Spark:
+        def __init__(self, reply: str):
+            self.reply = reply
+
+        async def _vision_request(self, prompt: str, images: list[bytes]) -> str:
+            return self.reply
+
+    import asyncio
+
+    candidate = asyncio.run(MetaInspector(Spark('{"box":[0.1,0.2,0.3,0.4],"confidence":"high","reason":"candidate"}')).analyze(b"image", "washer_fluid", "engine_candidate"))
+    assert candidate.status == "uncertain"
+    assert candidate.box == [0.1, 0.2, 0.3, 0.4]
+    invalid = asyncio.run(MetaInspector(Spark('{"box":[0.7,0.2,0.3,0.4],"confidence":"high"}')).analyze(b"image", "washer_fluid", "engine_candidate"))
+    assert invalid.status == "uncertain"
+    assert invalid.box is None

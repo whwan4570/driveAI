@@ -72,7 +72,15 @@ class MetaInspector:
         self.spark = spark
 
     async def analyze(self, jpeg: bytes, component: str, photo_type: str) -> InspectionResult:
-        if component == "washer_fluid" and photo_type == "engine":
+        if component == "washer_fluid" and photo_type == "engine_candidate":
+            prompt = (
+                "Find a possible windshield washer fluid filler cap in this engine bay. "
+                "Look throughout the frame, including its edges. A blue cap is only a candidate, not proof. "
+                "Return JSON only: {\"box\": [left,top,right,bottom] normalized 0..1 around the candidate cap or null, "
+                "\"confidence\": \"high|medium|low\", \"reason\": \"candidate|occluded|unclear\"}. "
+                "Return null if no plausible cap is visible."
+            )
+        elif component == "washer_fluid" and photo_type == "engine":
             prompt = (
                 "Find the windshield-washer fluid filler cap in this engine-bay photo. Inspect the whole frame, "
                 "including the lower left and right corners. A washer cap is often blue and attached to a narrow "
@@ -144,6 +152,14 @@ class MetaInspector:
             product_status = verdict.value
             message = "Washer fluid is visible on the label." if product_status == "MATCH" else "This isn't washer fluid. Don't pour it." if product_status == "CONFLICT" else "The product could not be verified. Show the full label again."
             return InspectionResult(status="located" if product_status == "MATCH" else "uncertain", component="washer_fluid", observation=message, confidence=confidence, product_status=product_status, product_label=label, source="meta_vision")
+        if component == "washer_fluid" and photo_type == "engine_candidate":
+            box = _normalized_box(parsed.get("box"))
+            reason = parsed.get("reason")
+            message = "Possible cap found. Checking closer." if box else (
+                "Waiting for your hand to move." if reason == "occluded" else "Step back so both sides are visible."
+            )
+            return InspectionResult(status="uncertain", component="washer_fluid", observation=message,
+                                    box=box, confidence=confidence, source="meta_vision")
         if component == "washer_fluid":
             box = parsed.get("box")
             basis = parsed.get("basis")

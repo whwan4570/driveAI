@@ -262,7 +262,7 @@ class ManualRecordIn(BaseModel):
 
 class InspectionIn(BaseModel):
     component: Literal["washer_fluid", "tires"]
-    photo_type: Literal["engine", "product", "tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"]
+    photo_type: Literal["engine", "engine_candidate", "product", "tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"]
     jpeg_base64: str = Field(min_length=100, max_length=5_600_000)
 
 
@@ -692,7 +692,7 @@ def create_app(
     @app.post("/vehicles/{vehicle_id}/inspections/analyze", response_model=InspectionResult)
     async def analyze_inspection(vehicle_id: str, body: InspectionIn) -> InspectionResult:
         vehicle_or_404(vehicle_id)
-        if (body.component == "washer_fluid" and body.photo_type not in {"engine", "product"}) or (body.component == "tires" and body.photo_type not in {"tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"}):
+        if (body.component == "washer_fluid" and body.photo_type not in {"engine", "engine_candidate", "product"}) or (body.component == "tires" and body.photo_type not in {"tire", "tire_sidewall", "tire_tread", "tire_tread_gauge"}):
             raise HTTPException(422, "photo type does not match component")
         try:
             jpeg = base64.b64decode(body.jpeg_base64, validate=True)

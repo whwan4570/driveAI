@@ -343,7 +343,7 @@ export const api = {
   washerShopping: (vehicleId: string) => call<WasherShoppingPick>(`/vehicles/${vehicleId}/shopping/washer`),
   addRecord: (body: { vehicle_id: string; component: "washer_fluid" | ServiceComponent; event_type: "inspection" | "refill" | "rotation" | "replacement"; completed_at: string; odometer_km?: number; notes?: string; photo_data_url?: string; user_confirmed: true }) =>
     post<MaintenanceRecord>("/maintenance-records", body),
-  analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "product" | "tire" | "tire_sidewall" | "tire_tread" | "tire_tread_gauge"; jpeg_base64: string }) =>
+  analyzeInspection: (vehicleId: string, body: { component: "washer_fluid" | "tires"; photo_type: "engine" | "engine_candidate" | "product" | "tire" | "tire_sidewall" | "tire_tread" | "tire_tread_gauge"; jpeg_base64: string }) =>
     postWithTimeout<InspectionResult>(`/vehicles/${vehicleId}/inspections/analyze`, body, 30_000),
   briefing: (vehicleId: string, coords?: { lat: number; lon: number }) =>
     post<{ text: string }>("/briefings", { vehicle_id: vehicleId, ...coords }),

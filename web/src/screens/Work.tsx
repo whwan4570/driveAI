@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon, Waveform } from "../components/Icons";
 import { InletCue } from "../components/InletCue";
 import { api, type InspectionResult, type SessionUpdate, type SessionView, type Step, type VoiceIntent, type WaitReason, type TransitionEvidence } from "../lib/api";
-import { cameraFailureMessage, cameraFrameIsBlank, FULL_FRAME, grabJpeg, openRearCamera, roiAround, waitForCameraFrame, type Roi } from "../lib/camera";
+import { cameraFailureMessage, cameraFrameIsBlank, FULL_FRAME, grabGray, grabJpeg, openRearCamera, roiAround, type Roi } from "../lib/camera";
 import { parseUtterance } from "../lib/commands";
 import { WorkSessionController } from "../lib/workSession";
 import { useUtterances, useVoice } from "../voiceContext";
@@ -70,7 +70,8 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
   const [searchAttempt, setSearchAttempt] = useState(0);
   const [searchingInlet, setSearchingInlet] = useState(false);
   const [searchFinished, setSearchFinished] = useState(false);
-  const [searchPass, setSearchPass] = useState(0);
+  const [candidatePoint, setCandidatePoint] = useState<{ x: number; y: number } | null>(null);
+  const hintRoiRef = useRef<Roi | null>(null);
   const [scanningLabel, setScanningLabel] = useState(false);
   const [labelRead, setLabelRead] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -210,92 +211,108 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
 
   useEffect(() => {
     const video = videoRef.current;
-    // The first successful inspection changes vision_status from unverified to ready.
-    // Blocking unverified here prevents that first request from ever happening.
     if (!video || !cameraAvailable || session || roiSelected || visionStatus === "billing_required" || visionStatus === "unauthorized") return;
     let cancelled = false;
     let timer: number | undefined;
-    let count = 0;
-    let frameWaits = 0;
+    let lastFrame: Uint8Array | null = null;
+    let previousFrame: Uint8Array | null = null;
+    let stable = 0;
+    let running = false;
+    let lastAttempt = 0;
+    let scanIndex = 0;
     setSearchFinished(false);
-    setSearchPass(0);
-    const search = async () => {
-      if (cancelled) return;
-      if (document.hidden) { timer = window.setTimeout(search, 1000); return; }
-      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-        if (++frameWaits >= 12) {
-          setError("The camera opened, but no video frames arrived. Close and reopen the guide.");
-          setSearchFinished(true);
-          return;
-        }
-        timer = window.setTimeout(search, 1000);
-        return;
-      }
+    setCandidatePoint(null);
+    const difference = (a: Uint8Array, b: Uint8Array) => a.reduce((sum, value, index) => sum + Math.abs(value - b[index]), 0) / a.length;
+    const tick = async () => {
+      if (cancelled || document.hidden || running || video.readyState < 2 || !video.videoWidth) return;
+      let frame: Uint8Array;
       try {
-        await waitForCameraFrame(video);
-        if (cancelled) return;
-        if (cameraFrameIsBlank(video)) {
-          if (++frameWaits >= 12) {
-            setError("The camera preview is visible, but captured frames are blank. Reopen the guide or try another browser.");
-            setSearchFinished(true);
-            return;
-          }
-          timer = window.setTimeout(search, 700);
-          return;
-        }
-      } catch {
-        if (!cancelled) {
-          setError("The camera frame could not be captured. Reopen the guide or try another browser.");
-          setSearchFinished(true);
-        }
-        return;
-      }
-      setVideoSize((size) => size.width === video.videoWidth && size.height === video.videoHeight ? size : { width: video.videoWidth, height: video.videoHeight });
-      count += 1;
-      setSearchPass(count);
+        if (cameraFrameIsBlank(video)) return;
+        frame = grabGray(video, FULL_FRAME, 48);
+      } catch { return; }
+      if (previousFrame && difference(frame, previousFrame) < 4) stable++; else stable = 0;
+      previousFrame = frame;
+      if (stable < 3 || performance.now() - lastAttempt < 4000) return;
+      if (lastFrame && difference(frame, lastFrame) < 8 && !hintRoiRef.current) return;
+      running = true;
+      lastAttempt = performance.now();
+      lastFrame = frame;
       setSearchingInlet(true);
+      setError(null);
       try {
-        const searchRoi = INLET_SEARCH_ROIS[count - 1];
-        const result = await api.analyzeInspection(vehicleId, { component: "washer_fluid", photo_type: "engine", jpeg_base64: grabJpeg(video, searchRoi, 1920, 0.78) });
+        const searchRoi = hintRoiRef.current ?? INLET_SEARCH_ROIS[scanIndex++ % INLET_SEARCH_ROIS.length];
+        hintRoiRef.current = null;
+        const candidate = await api.analyzeInspection(vehicleId, { component: "washer_fluid", photo_type: "engine_candidate", jpeg_base64: grabJpeg(video, searchRoi, 1920, 0.85) });
         if (cancelled) return;
-        const fullBox = result.box ? boxInFullFrame(result.box, searchRoi) : null;
-        setInspection({ ...result, box: fullBox });
-        if (result.status === "located" && fullBox) {
-          const x = (fullBox[0] + fullBox[2]) / 2;
-          const y = (fullBox[1] + fullBox[3]) / 2;
-          const next = roiAround(x, y);
-          roiRef.current = next;
-          roiSelectedRef.current = true;
-          setInletPoint({ x, y });
-          setRoiSelected(true);
-          setSearchingInlet(false);
+        if (difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
+        if (candidate.status === "unavailable") { setError(candidate.observation); setSearchFinished(true); return; }
+        const box = candidate.box ? boxInFullFrame(candidate.box, searchRoi) : null;
+        if (!box) { setCandidatePoint(null); setInspection(candidate); setSearchFinished(true); return; }
+        const point = { x: (box[0] + box[2]) / 2, y: (box[1] + box[3]) / 2 };
+        setCandidatePoint(point);
+        setInspection({ ...candidate, observation: "Checking the highlighted area. Hold still." });
+        const crop = roiAround(point.x, point.y, 0.35);
+        const firstTime = video.currentTime;
+        const firstImage = grabJpeg(video, crop, 1920, 0.85);
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+        if (cancelled || difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
+        if (video.currentTime <= firstTime) {
+          setInspection({ ...candidate, observation: "Waiting for a new camera frame." });
+          setSearchFinished(true);
           return;
         }
-        if (result.status === "unavailable") { setError(result.observation); setSearchFinished(true); return; }
+        const secondImage = grabJpeg(video, crop, 1920, 0.85);
+        const results = await Promise.all([firstImage, secondImage].map((jpeg_base64) => api.analyzeInspection(vehicleId, {
+          component: "washer_fluid", photo_type: "engine", jpeg_base64,
+        })));
+        if (cancelled) return;
+        if (difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
+        const unavailable = results.find((result) => result.status === "unavailable");
+        if (unavailable) { setError(unavailable.observation); setSearchFinished(true); return; }
+        const verified = results.map((result) => result.box ? boxInFullFrame(result.box, crop) : null);
+        if (results.some((result, index) => {
+          const bounds = verified[index];
+          return result.status !== "located" || !bounds || Math.abs((bounds[0] + bounds[2]) / 2 - point.x) > 0.12 || Math.abs((bounds[1] + bounds[3]) / 2 - point.y) > 0.12;
+        })) {
+          setInspection({ ...candidate, observation: "Move closer to the highlighted area." });
+          setSearchFinished(true);
+          return;
+        }
+        const [first, second] = verified;
+        if (!first || !second || second[0] >= first[2] || second[2] <= first[0] || second[1] >= first[3] || second[3] <= first[1]) {
+          setInspection({ ...candidate, observation: "The cap moved out of view. Hold still and try again." });
+          setCandidatePoint(null);
+          setSearchFinished(true);
+          return;
+        }
+        const x = (second[0] + second[2]) / 2;
+        const y = (second[1] + second[3]) / 2;
+        roiRef.current = roiAround(x, y);
+        roiSelectedRef.current = true;
+        setInspection({ ...results[1], box: second });
+        setCandidatePoint(null);
+        setInletPoint({ x, y });
+        setRoiSelected(true);
       } catch {
         if (!cancelled) { setError("Camera analysis is unavailable. Check your connection and try again."); setSearchFinished(true); }
-        return;
       } finally {
+        running = false;
         if (!cancelled) setSearchingInlet(false);
       }
-      if (!cancelled && count < INLET_SEARCH_ROIS.length) timer = window.setTimeout(search, 4000);
-      else if (!cancelled) setSearchFinished(true);
     };
-    void search();
-    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+    timer = window.setInterval(() => { void tick(); }, 500);
+    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
   }, [vehicleId, cameraAvailable, session, roiSelected, visionStatus, searchAttempt]);
 
   const pickRoi = (e: MouseEvent<HTMLDivElement>) => {
     if (session) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = cover ? (e.clientX - rect.left + cover.offsetX) / cover.width : (e.clientX - rect.left) / rect.width;
-    const y = cover ? (e.clientY - rect.top + cover.offsetY) / cover.height : (e.clientY - rect.top) / rect.height;
-    const next = roiAround(x, y);
-    setInletPoint({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
-    roiRef.current = next;
-    roiSelectedRef.current = true;
-    setRoiSelected(true);
-    setSearchingInlet(false);
+    const x = Math.min(1, Math.max(0, cover ? (e.clientX - rect.left + cover.offsetX) / cover.width : (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, cover ? (e.clientY - rect.top + cover.offsetY) / cover.height : (e.clientY - rect.top) / rect.height));
+    hintRoiRef.current = roiAround(x, y);
+    setCandidatePoint(null);
+    setInspection(null);
+    setSearchAttempt((n) => n + 1);
   };
 
   const applyUpdate = (u: SessionUpdate) => {
@@ -351,7 +368,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     const video = videoRef.current;
     if (!video || starting) return;
     if (!video.videoWidth) { setError("A live camera is needed for hands-free guidance. Allow camera access and try again."); return; }
-    if (inspection?.status !== "located" && !roiSelected) { setError("First locate the inlet with a photo or tap the washer cap in the live view."); return; }
+    if (!roiSelected || inspection?.status !== "located") { setError("First locate the inlet with a photo or tap the washer cap in the live view."); return; }
     setStarting(true);
     setError(null);
     try {
@@ -427,6 +444,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
     if (issue === "empty") voiceErrorTimerRef.current = window.setTimeout(() => { setVoiceError(null); voiceErrorTimerRef.current = null; }, 3000);
   });
 
+  useEffect(() => {
+    if (roiSelected && inspection?.status === "located" && !session && !starting) void start();
+  }, [roiSelected, inspection, session]);
+
   const located = inspection?.status === "located" && inspection.box
     ? { x: (inspection.box[0] + inspection.box[2]) / 2, y: (inspection.box[1] + inspection.box[3]) / 2 } : null;
   const anchor = roiSelected && inletPoint ? inletPoint : located;
@@ -472,6 +493,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         ])}
       </svg>}
       {session?.step === "CONFIRM_PRODUCT" && <div className="arw-label-guide" aria-hidden="true"><span>Fill this frame with the label</span></div>}
+      {candidatePoint && cameraAvailable && !session && <div aria-hidden="true" style={{ position: "absolute", left: cover ? candidatePoint.x * cover.width - cover.offsetX : `${candidatePoint.x * 100}%`, top: cover ? candidatePoint.y * cover.height - cover.offsetY : `${candidatePoint.y * 100}%`, width: 64, height: 64, border: "3px dashed white", borderRadius: "50%", transform: "translate(-50%, -50%)", pointerEvents: "none" }}/>}
       {anchor && cameraAvailable && <InletCue
         left={cover ? anchor.x * cover.width - cover.offsetX : `${anchor.x * 100}%`}
         top={cover ? anchor.y * cover.height - cover.offsetY : `${anchor.y * 100}%`}
@@ -510,14 +532,15 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
         </> : <>
           <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
-          <h1>{anchor ? "Keep the phone still and start" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
-          <p>{anchor ? "Check the washer symbol on the marked cap." : "I'll look for the cap, or tap it on screen."}</p>
-          {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {searchPass > 0 ? `${searchPass} of ${INLET_SEARCH_ROIS.length}` : ""}{inspection?.status === "uncertain" ? ` · ${inspection.observation}` : ""}</p>}
+          <h1>{anchor ? "Washer cap found" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
+          <p>{anchor ? "Starting the guide…" : "Show the whole engine bay. I’ll find the washer cap."}</p>
+          {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {inspection?.status === "uncertain" ? ` · ${inspection.observation}` : ""}</p>}
           {inspection && !searchingInlet && <p className={`arw-note ${inspection.status}`}>{inspection.observation}</p>}
-          {searchFinished && !anchor && <p className="arw-note">Move closer or try another angle.</p>}
+          {searchFinished && !anchor && <p className="arw-note">Move the phone to search again.</p>}
           <div className="arw-actions">
-            <button type="button" className="arw-secondary" onClick={() => { setError(null); setInspection(null); setSearchAttempt((n) => n + 1); }} disabled={searchingInlet}><Icon name="camera" size={18}/>Look again</button>
-            <button type="button" className="arw-primary" onClick={() => void start()} disabled={starting || !anchor}>{starting ? "Starting…" : "Start guide"}</button>
+            <button type="button" className="arw-secondary" onClick={() => { setError(null); setInspection(null); setSearchAttempt((n) => n + 1); }} disabled={searchingInlet || !!anchor}><Icon name="camera" size={18}/>Look again</button>
+            {anchor && error && <button type="button" className="arw-primary" onClick={() => void start()} disabled={starting}>Try starting again</button>}
+
           </div>
           {demoMode && <p className="arw-note">Demo mode simulates step observations. It does not verify real camera actions.</p>}
         </> : done ? <>
