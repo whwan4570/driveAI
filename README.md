@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/e234ab73-7eac-4afe-a837-9550db998467
+
 # Carmori
 
 **A hands-free AI car-care companion that helps you complete a maintenance task and remembers what happened.**
