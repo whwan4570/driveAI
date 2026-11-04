@@ -1,3 +1,5 @@
+
+
 # Carmori
 
 **A hands-free car-care guide that sees the task, helps you finish it, and remembers what happened.**
@@ -100,7 +102,13 @@ Technology is usually measured by what it can do. We would rather be measured by
 
 **Live prototype:** [Open Carmori](https://driveai-ni3a.onrender.com/) on a phone or desktop. The hosted HTTPS app needs no local setup; allow camera and microphone access to try the guides. The [local setup](#run-it-locally) below is for development and reproduction.
 
-**[Demo video](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
+**https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03(#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
+
+https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
+
+
+
+
 
 ## What judges can verify
 
