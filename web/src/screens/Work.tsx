@@ -38,6 +38,52 @@ function boxInFullFrame(box: [number, number, number, number], crop: Roi): [numb
   return [crop.x + box[0] * crop.w, crop.y + box[1] * crop.h, crop.x + box[2] * crop.w, crop.y + box[3] * crop.h];
 }
 
+type InletConfirmation =
+  | { kind: "located"; result: InspectionResult; box: [number, number, number, number] }
+  | { kind: "uncertain"; result: InspectionResult }
+  | { kind: "unavailable"; result: InspectionResult }
+  | { kind: "stale" }
+  | { kind: "no_new_frame" };
+
+/** One strict expanded check is enough; only an uncertain result gets one fresh-frame retry. */
+async function confirmWasherInlet(
+  video: HTMLVideoElement,
+  vehicleId: string,
+  crop: Roi,
+  candidate: { x: number; y: number },
+  referenceFrame: Uint8Array,
+  isActive: () => boolean,
+  onRetry: () => void,
+): Promise<InletConfirmation> {
+  const sceneIsCurrent = () => isActive() && frameDifference(referenceFrame, grabGray(video, FULL_FRAME, 48)) <= 8;
+  const analyze = () => api.analyzeInspection(vehicleId, {
+    component: "washer_fluid", photo_type: "engine", jpeg_base64: grabJpeg(video, crop, 1920, 0.85),
+  });
+  if (!sceneIsCurrent()) return { kind: "stale" };
+  let result = await analyze();
+  if (!sceneIsCurrent()) return { kind: "stale" };
+  if (result.status === "unavailable") return { kind: "unavailable", result };
+
+  if (result.status === "uncertain") {
+    onRetry();
+    const firstTime = video.currentTime;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+    if (!sceneIsCurrent()) return { kind: "stale" };
+    if (video.currentTime <= firstTime) return { kind: "no_new_frame" };
+    result = await analyze();
+    if (!sceneIsCurrent()) return { kind: "stale" };
+    if (result.status === "unavailable") return { kind: "unavailable", result };
+  }
+
+  const box = result.box ? boxInFullFrame(result.box, crop) : null;
+  if (result.status !== "located" || !box ||
+      Math.abs((box[0] + box[2]) / 2 - candidate.x) > 0.12 ||
+      Math.abs((box[1] + box[3]) / 2 - candidate.y) > 0.12) {
+    return { kind: "uncertain", result };
+  }
+  return { kind: "located", result, box };
+}
+
 export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voiceReady: boolean; onDone: () => void }) {
   const voice = useVoice();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -265,45 +311,37 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         setInspection({ ...candidate, observation: "Checking the highlighted area. Hold still." });
         // Keep the filler neck in view. A cap-only crop was ambiguous in portrait video.
         const crop = roiAround(point.x, point.y, 0.45);
-        const firstTime = video.currentTime;
-        const firstImage = grabJpeg(video, crop, 1920, 0.85);
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
-        if (cancelled || difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
-        if (video.currentTime <= firstTime) {
+        const confirmation = await confirmWasherInlet(video, vehicleId, crop, point, frame, () => !cancelled, () => {
+          setInspection({ ...candidate, observation: "Checking the washer cap again. Hold still." });
+        });
+        if (confirmation.kind === "stale") {
+          setCandidatePoint(null);
+          lastFrame = null;
+          return;
+        }
+        if (confirmation.kind === "no_new_frame") {
           setInspection({ ...candidate, observation: "Waiting for a new camera frame." });
           setSearchFinished(true);
           return;
         }
-        const secondImage = grabJpeg(video, crop, 1920, 0.85);
-        const results = await Promise.all([firstImage, secondImage].map((jpeg_base64) => api.analyzeInspection(vehicleId, {
-          component: "washer_fluid", photo_type: "engine", jpeg_base64,
-        })));
-        if (cancelled) return;
-        if (difference(frame, grabGray(video, FULL_FRAME, 48)) > 8) { setCandidatePoint(null); lastFrame = null; return; }
-        const unavailable = results.find((result) => result.status === "unavailable");
-        if (unavailable) { setError(unavailable.observation); setSearchFinished(true); return; }
-        const verified = results.map((result) => result.box ? boxInFullFrame(result.box, crop) : null);
-        if (results.some((result, index) => {
-          const bounds = verified[index];
-          return result.status !== "located" || !bounds || Math.abs((bounds[0] + bounds[2]) / 2 - point.x) > 0.12 || Math.abs((bounds[1] + bounds[3]) / 2 - point.y) > 0.12;
-        })) {
-          setInspection({ ...candidate, observation: "Move closer to the highlighted area." });
+        if (confirmation.kind === "unavailable") {
+          setError(confirmation.result.observation);
           setSearchFinished(true);
           return;
         }
-        const [first, second] = verified;
-        if (!first || !second || second[0] >= first[2] || second[2] <= first[0] || second[1] >= first[3] || second[3] <= first[1]) {
-          setInspection({ ...candidate, observation: "The cap moved out of view. Hold still and try again." });
-          setCandidatePoint(null);
+        if (confirmation.kind === "uncertain") {
+          // A model box far from the candidate is still unverified; never render a confirmed cue.
+          setInspection({ ...confirmation.result, status: "uncertain", box: null, observation: "Move closer to the highlighted area." });
           setSearchFinished(true);
           return;
         }
-        const x = (second[0] + second[2]) / 2;
-        const y = (second[1] + second[3]) / 2;
+        const { box: verifiedBox } = confirmation;
+        const x = (verifiedBox[0] + verifiedBox[2]) / 2;
+        const y = (verifiedBox[1] + verifiedBox[3]) / 2;
         localTrackSeedRef.current = captureTrackingFrame(video);
         roiRef.current = roiAround(x, y);
         roiSelectedRef.current = true;
-        setInspection({ ...results[1], box: second });
+        setInspection({ ...confirmation.result, box: verifiedBox });
         setCandidatePoint(null);
         updateInletPoint({ x, y });
         setRoiSelected(true);
@@ -516,23 +554,10 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
       const candidateBox = boxInFullFrame(candidate.box, searchRoi);
       const next = { x: (candidateBox[0] + candidateBox[2]) / 2, y: (candidateBox[1] + candidateBox[3]) / 2 };
       const crop = roiAround(next.x, next.y, 0.45);
-      const firstImage = grabJpeg(video, crop, 1920, 0.85);
-      const firstTime = video.currentTime;
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
-      if (!active || video.currentTime <= firstTime || frameDifference(firstFrame, grabGray(video, FULL_FRAME, 48)) > 8) return;
-      const secondImage = grabJpeg(video, crop, 1920, 0.85);
-      const results = await Promise.all([firstImage, secondImage].map((jpeg_base64) => api.analyzeInspection(vehicleId, {
-        component: "washer_fluid", photo_type: "engine", jpeg_base64,
-      })));
-      if (!active || frameDifference(firstFrame, grabGray(video, FULL_FRAME, 48)) > 8) return;
-      const unavailable = results.find((result) => result.status === "unavailable");
-      if (unavailable) { pauseForAnalysis(unavailable.observation); return; }
-      const verified = results.map((result) => result.box ? boxInFullFrame(result.box, crop) : null);
-      if (results.some((result, index) => result.status !== "located" || !verified[index])) return;
-      const [first, second] = verified;
-      if (!first || !second || first[0] >= second[2] || first[2] <= second[0] || first[1] >= second[3] || first[3] <= second[1]) return;
-      const confirmed = { x: (second[0] + second[2]) / 2, y: (second[1] + second[3]) / 2 };
-      if (Math.hypot(confirmed.x - next.x, confirmed.y - next.y) > 0.12) return;
+      const confirmation = await confirmWasherInlet(video, vehicleId, crop, next, firstFrame, () => active, () => {});
+      if (confirmation.kind === "unavailable") { pauseForAnalysis(confirmation.result.observation); return; }
+      if (confirmation.kind !== "located") return;
+      const confirmed = { x: (confirmation.box[0] + confirmation.box[2]) / 2, y: (confirmation.box[1] + confirmation.box[3]) / 2 };
       point = confirmed;
       reference = captureTrackingFrame(video);
       localTrackSeedRef.current = reference;

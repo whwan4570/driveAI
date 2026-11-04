@@ -75,7 +75,8 @@ class MetaInspector:
         if component == "washer_fluid" and photo_type == "engine_candidate":
             prompt = (
                 "Find a possible windshield washer fluid filler cap in this engine bay. "
-                "Look throughout the frame, including its edges. A blue cap is only a candidate, not proof. "
+                "Look throughout the frame, including its edges. When several caps are plausible, prioritize a blue "
+                "cap attached to a narrow white or translucent filler neck. Blue color alone is only a candidate, not proof. "
                 "Return JSON only: {\"box\": [left,top,right,bottom] normalized 0..1 around the candidate cap or null, "
                 "\"confidence\": \"high|medium|low\", \"reason\": \"candidate|occluded|unclear\"}. "
                 "Return null if no plausible cap is visible."
