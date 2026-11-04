@@ -14,7 +14,7 @@ https://github.com/user-attachments/assets/ed7b1a9d-724c-48a9-ab49-3d51deea863e
 
 *Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo sequence](#demo-3-minutes).*
 
-Washer-fluid refills are a routine task across vehicle makes, yet finding the right cap and checking the product while both hands are busy can still be awkward. Carmori starts with that complete task on a car. Its vehicle-specific manual, camera observation, step rules and saved record provide a structure to adapt to other cars after validating each model's instructions and recognition.
+Refilling washer fluid is a routine task for all vehicle manufacturers, but just as finding the right cap and checking the product can be difficult for anyone, it can still be challenging and inconvenient for first-timers or those unfamiliar with their vehicle. Kamori begins with the complete work on the automobile. Vehicle-specific manuals, camera observations, step-by-step rules, and saved records provide a framework that can be applied to other vehicles after verifying the instructions and recognition for each model.
 
 **Hackathon demo:** On a 2014 Hyundai Sonata, Carmori finds the washer-fluid cap in the camera view, checks two independent observations before advancing each step, answers spoken questions in the current task context, and saves how the refill was confirmed. The defining moment is opening the cap with both hands while the guide advances without a screen tap.
 
