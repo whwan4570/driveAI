@@ -102,12 +102,7 @@ Technology is usually measured by what it can do. We would rather be measured by
 
 **Live prototype:** [Open Carmori](https://driveai-ni3a.onrender.com/) on a phone or desktop. The hosted HTTPS app needs no local setup; allow camera and microphone access to try the guides. The [local setup](#run-it-locally) below is for development and reproduction.
 
-**https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03(#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
-
-https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
-
-
-
+**[Demo video](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
 
 
 ## What judges can verify
@@ -117,7 +112,7 @@ https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
 | **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo video](#demo-3-minutes), [supported car and sources](#supported-car-and-data-sources) |
 | **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Home shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical Depth & Execution (20%)** | A deterministic state machine requires two disjoint observations, rejects stale responses and incompatible products, and records whether completion was observed or user-confirmed. | [Decision rules](#how-the-hands-free-refill-decides), [replay tests](#tests) |
-| **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting care-history record. | [Demo video](#demo-3-minutes) |
+| **Demo (25%)** | The camera view shows the cap cue, the hands it recognizes, a no-tap step change in real time, and the tire check capturing views on its own. | [Demo video](#demo-3-minutes) |
 
 The live video should show the **camera scene and the app screen together** at the no-tap transition. A simulated run must be labeled **Demo Mode**; it is not evidence of a successful Meta-backed camera run.
 
@@ -202,7 +197,7 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 
 ## Demo (3 minutes)
 
-[demo-video]
+https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
 
 This is a **vertical slice of the longer-term Carmori experience**, not a claim that every vehicle or maintenance task is supported today. The story starts with what the car knows, moves into a physical task, and ends with a new memory the assistant can recall.
 
