@@ -22,9 +22,18 @@ The demo follows one maintenance task on a **2014 Hyundai Sonata**: review the c
 
 ## The problem
 
-Car manuals and repair videos can explain a task, but they cannot see the part in front of you or check whether you completed a step correctly. This is especially inconvenient during simple jobs when both hands are occupied. Maintenance history is often scattered across receipts, reminders, and memory.
+Owning a car means keeping track of maintenance, renewal dates, documents, and past work, then deciding what to do next. Carmori is designed for owners who want those responsibilities connected to their own vehicle and explained in plain language.
 
-Carmori is our attempt to connect those pieces: identify the owner's vehicle, guide a physical task using camera observations and voice, then keep a record that can inform the next interaction.
+| Ownership problem | Published evidence | Connection to Carmori |
+| --- | --- | --- |
+| Keeping maintenance on schedule | In November 2024, CARFAX estimated that more than 30 million U.S. vehicles were overdue for both oil changes and tire rotations. [CARFAX release](https://www.prnewswire.com/news-releases/carfax-millions-of-cars-are-alarmingly-behind-on-maintenance-302314731.html) | Status and service history bring available manual guidance and past maintenance together to help owners review what is due. |
+| Remembering vehicle deadlines | Lloyds reported in June 2026 that 21% of UK drivers had forgotten essential vehicle-admin dates, including inspections (MOT), tax, or insurance. [Lloyds research](https://www.lloydsbankinggroup.com/media/press-releases/2026/lloyds/drivers-can-avoid-costly-penalties-with-new-in-app-car-admin-too.html) | Glove box groups saved driving documents and renewal dates for review. |
+| Managing scattered information | The same Lloyds research found that more than half used at least three apps or providers to manage aspects of running their car. [Lloyds research](https://www.lloydsbankinggroup.com/media/press-releases/2026/lloyds/drivers-can-avoid-costly-penalties-with-new-in-app-car-admin-too.html) | Vehicle records, documents, briefings, and questions share one ownership context. |
+| Feeling confident doing simple tasks | In a 2026 MoneySuperMarket survey of 2,000 UK drivers, 29.5% cited fear of mistakes or vehicle damage as a reason to avoid DIY maintenance; 29.8% had sought professional help to check or top up washer fluid. [Survey and methodology, April 27–May 1, 2026](https://www.moneysupermarket.com/car-insurance/should-i-fix-it/) | Camera and voice guidance help an owner follow the washer-fluid task and retain a record of its completion. |
+
+These sources describe different populations and measures: a CARFAX estimate and UK self-reported survey findings. They establish ownership problems, not Carmori adoption, a combined market size, or measured benefits from this prototype.
+
+Car manuals and repair videos can explain a task, but they cannot see the part in front of you or check whether you completed a step correctly. This is especially inconvenient when both hands are occupied. Carmori connects the broader management experience to that moment of action: review the car's records, guide a physical task using camera observations and voice, then save what was confirmed for the next interaction.
 
 ## What we built
 
@@ -68,7 +77,7 @@ The live 2D guidance cue uses local browser image matching between Muse checks, 
 
 | Area | What can be inspected | Evidence |
 | --- | --- | --- |
-| **Usefulness** | A vehicle-specific question, guided refill, and newly saved service record. | [Three-minute demo](#demo-3-minutes), [early real-car evidence](#early-real-car-evidence-and-scale), [supported car](#supported-car-and-data-sources) |
+| **Usefulness** | A vehicle-specific question, guided refill, and newly saved service record. | [Driver survey and problem](#the-problem), [three-minute demo](#demo-3-minutes), [early real-car evidence](#early-real-car-evidence-and-scale), [supported car](#supported-car-and-data-sources) |
 | **Meta model integration** | Muse Spark camera analysis, Muse Voice transcription, SAM 3.1 clip endpoint, and the supplied SAM 3D vehicle asset. | [Architecture](#how-the-meta-ai-components-fit-together), [integration scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical execution** | Independent-observation gate, product checks, out-of-order response handling, and provenance-aware records. | [State machine](backend/carmori/state_machine.py), [tests](#tests) |
 | **Demo** | The camera guidance and step transitions in the washer-fluid workflow. | [Demo video](#demo-3-minutes), [demo setup](#demo-setup) |
