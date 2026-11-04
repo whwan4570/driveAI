@@ -5,6 +5,7 @@ import { cameraFailureMessage, FULL_FRAME, grabGray, grabJpeg, openRearCamera, r
 import { captureTrackingFrame, type TrackingFrame } from "../lib/localVisualTracking";
 import { photoFromFile } from "../lib/photos";
 import { aimHint, averageBrightness, boxOnCoverView, trackTireBoxLocally, type Box } from "../lib/tireGuide";
+import { useVoice } from "../voiceContext";
 
 type View = "sidewall" | "tread";
 type Shot = { wheel: number; view: View; photo: string; result: InspectionResult };
@@ -118,6 +119,7 @@ async function makeContactSheet(shots: Shot[], gaugePhotos: (string | null)[]): 
 }
 
 export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehicle; onSaved: () => void; onCancel: () => void }) {
+  const voice = useVoice();
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inFlightRef = useRef(false);
@@ -151,12 +153,36 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
   const [gaugeWheel, setGaugeWheel] = useState<number | null>(null);
   const [gaugeSuggestion, setGaugeSuggestion] = useState<{ mm: string; label: string; photo: string } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const initialStepRef = useRef(true);
+  const spokenKeysRef = useRef(new Set<string>());
 
   activeIndexRef.current = scanIndex;
   gaugeWheelRef.current = gaugeWheel;
   const complete = scanIndex === STEPS.length;
   const current = STEPS[Math.min(scanIndex, STEPS.length - 1)];
   const result = complete ? recommendation(shots, depths) : null;
+  const stepInstruction = gaugeWheel !== null
+    ? `Show the tread-depth gauge reading and unit for the ${WHEELS[gaugeWheel].label.toLowerCase()} tire.`
+    : complete
+      ? `${result?.title ?? "Tire check complete"}. Review the photos and tire positions before saving.`
+      : `${WHEELS[current.wheel].label} tire. ${VIEW_TIP[current.view]}`;
+  const announce = (key: string, text: string) => {
+    if (spokenKeysRef.current.has(key)) return;
+    spokenKeysRef.current.add(key);
+    void voice.speak(text);
+  };
+
+  useEffect(() => {
+    spokenKeysRef.current.clear();
+    if (initialStepRef.current) { initialStepRef.current = false; return; }
+    if (scanIndex === STEPS.length) {
+      announce("complete", stepInstruction);
+      return;
+    }
+    const step = STEPS[scanIndex];
+    const lead = step.view === "tread" ? "Sidewall captured. " : scanIndex > 0 ? `${WHEELS[step.wheel].label} tire next. ` : "";
+    announce(`step:${scanIndex}`, `${lead}${VIEW_TIP[step.view]}`);
+  }, [scanIndex]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -252,6 +278,16 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         const box = response.tire_box ? boxInFrame(response.tire_box as Box, roi) : null;
         const hint = box ? aimHint(box) : null;
         setStatus(hint && response.rejection_reason !== "too_small" ? `${response.observation} ${hint}.` : response.observation);
+        const retrySpeech: Partial<Record<TireViewQuality, string>> = {
+          blurry: "Hold the camera still for a clearer tire photo.",
+          dark: "Add light to the tire or change the angle.",
+          too_small: "Move closer to the tire.",
+          wrong_view: step.view === "tread" ? "Tilt the camera toward the tread grooves." : "Show the tire's outer sidewall.",
+          no_tire: "Bring the tire into the camera view.",
+          unclear: "I cannot confirm this tire view yet. Move the phone for a clearer view.",
+        };
+        const retryLine = response.rejection_reason ? retrySpeech[response.rejection_reason] : retrySpeech.unclear;
+        if (retryLine) announce(`retry:${index}:${response.rejection_reason ?? "unclear"}`, retryLine);
         // The box belongs to this frame, so it is only drawn for live shots and until the phone moves.
         let stillCurrent = false;
         if (box && frame && videoRef.current?.videoWidth) {
@@ -271,6 +307,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         setOutline(null);
         setError("Analysis paused. Your photos are kept; try this view again.");
         setStatus("Check paused");
+        announce(`error:${index}`, "Analysis paused. Your photos are saved. Retry this view when connected.");
       }
     } finally {
       inFlightRef.current = false;
@@ -318,7 +355,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         }
       }
       // Local checks run first, so a dark or moving view does not use a model call.
-      if (averageBrightness(frame) < TOO_DARK_BRIGHTNESS) { stableCountRef.current = 0; setStatus("It's too dark here. Add light or change the angle."); return; }
+      if (averageBrightness(frame) < TOO_DARK_BRIGHTNESS) { stableCountRef.current = 0; setStatus("It's too dark here. Add light or change the angle."); announce(`dark:${scanIndex}`, "Add light to the tire or change the angle."); return; }
       if (!movementNeededRef.current && stableCountRef.current === 0) setStatus("Hold still…");
       if (movementNeededRef.current || stableCountRef.current < 3 || performance.now() - lastAttemptRef.current < 5000) return;
       const best = bestFrameRef.current;
@@ -467,7 +504,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
     <div className="arw-bottom">
       {error && <div className="arw-error" role="alert">{error}</div>}
       {!complete ? <section className="arw-card tire-guide-card" aria-live="polite">
-        <span className="arw-status"><span className="arw-dot"/>{busy ? "Analyzing camera view" : retryRequired ? "Analysis paused" : cameraFailure ? "Camera unavailable" : "Auto capture on"}</span>
+        <div className="arw-card-top"><span className="arw-status"><span className="arw-dot"/>{busy ? "Analyzing camera view" : retryRequired ? "Analysis paused" : cameraFailure ? "Camera unavailable" : "Auto capture on"}</span><button type="button" className="arw-hear" onClick={() => void voice.speak(stepInstruction)} aria-label="Hear current tire instruction"><Icon name="volume" size={20}/></button></div>
         <h1>{WHEELS[current.wheel].label}: show the {current.view}</h1>
         <p>{retryRequired ? "Analysis paused. Retry when connected." : status}</p>
         {current.view === "tread" && shots.find((shot) => shot.wheel === current.wheel && shot.view === "sidewall") && <div className="tire-last-shot"><img src={shots.find((shot) => shot.wheel === current.wheel && shot.view === "sidewall")?.photo} alt="Captured sidewall"/><span>Sidewall captured ✓<br/>Now show the tread grooves.</span></div>}
@@ -477,14 +514,14 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
             : <button type="button" className="arw-primary" onClick={captureNow} disabled={!cameraReady || busy}><Icon name="camera" size={18}/>{busy ? "Checking…" : "Scan now"}</button>}
         </div>
       </section> : gaugeWheel !== null ? <section className="arw-card tire-guide-card" aria-live="polite">
-        <span className="arw-status"><span className="arw-dot"/>{busy ? "Reading camera view" : "Tread-depth gauge"}</span>
+        <div className="arw-card-top"><span className="arw-status"><span className="arw-dot"/>{busy ? "Reading camera view" : "Tread-depth gauge"}</span><button type="button" className="arw-hear" onClick={() => void voice.speak(stepInstruction)} aria-label="Hear gauge instruction"><Icon name="volume" size={20}/></button></div>
         <h1>{WHEELS[gaugeWheel].label}: show the gauge</h1>
         {gaugeSuggestion ? <><p>Camera read <strong>{gaugeSuggestion.label}</strong> ({gaugeSuggestion.mm} mm). Check the display yourself before using it.</p><img className="tire-gauge-preview" src={gaugeSuggestion.photo} alt="Gauge photo to confirm"/>
           <div className="arw-actions"><button type="button" className="arw-secondary" onClick={() => { setGaugeSuggestion(null); setStatus("Show the gauge again."); }}>Try again</button><button type="button" className="arw-primary" onClick={() => { setDepths((values) => values.map((value, index) => index === gaugeWheel ? gaugeSuggestion.mm : value)); setGaugePhotos((values) => values.map((value, index) => index === gaugeWheel ? gaugeSuggestion.photo : value)); setGaugeSuggestion(null); setGaugeWheel(null); }}>Use reading</button></div>
         </> : <><p>{status}</p><div className="arw-actions"><button type="button" className="arw-secondary" onClick={() => inputRef.current?.click()} disabled={busy}><Icon name="file" size={18}/>Upload photo</button><button type="button" className="arw-primary" onClick={captureGaugeNow} disabled={!cameraReady || busy}><Icon name="camera" size={18}/>{busy ? "Reading…" : "Read now"}</button></div></>}
         <button type="button" className="arw-link" onClick={() => { setGaugeWheel(null); setGaugeSuggestion(null); setError(null); }}>Back to results</button>
       </section> : <form className="arw-card tire-guide-summary" onSubmit={(event) => void save(event)}>
-        <span className={`tire-result-tone ${result?.tone}`}>Four tires · Eight camera views</span>
+        <div className="arw-card-top"><span className={`tire-result-tone ${result?.tone}`}>Four tires · Eight camera views</span><button type="button" className="arw-hear" onClick={() => void voice.speak(stepInstruction)} aria-label="Hear tire check result"><Icon name="volume" size={20}/></button></div>
         <h1>{result?.title}</h1><p>{result?.detail}</p>
         <div className="tire-summary-map" aria-label="Select a tire to see its results">{WHEELS.map((wheel, index) => {
           const wheelShots = shots.filter((shot) => shot.wheel === index);
@@ -495,7 +532,7 @@ export function TireVisualGuide({ vehicle, onSaved, onCancel }: { vehicle: Vehic
         <p>Tap a tire for its photos and readings.</p>
         <div className="tire-wheel-results">{WHEELS.map((wheel, index) => {
           const wheelShots = shots.filter((shot) => shot.wheel === index);
-          return <div className="tire-wheel-result" key={wheel.short} hidden={selectedWheel !== index}><strong>{wheel.label}</strong>{wheelShots.map((shot) => <span key={shot.view}>{shot.view === "sidewall" ? "Sidewall" : "Tread"}: {shot.result.tire_findings.length ? shot.result.tire_findings.map(findingLabel).join(", ") : "no visible issue"}</span>)}<span className={depths[index] ? "tire-measured" : "tire-not-measured"}>Tread depth: {depths[index] ? `${depths[index]} mm${gaugePhotos[index] ? " (gauge photo, confirmed)" : " (entered)"}` : "not measured"}</span><span className="tire-not-measured">Pressure: not measured</span><div>{wheelShots.map((shot) => <img key={shot.view} src={shot.photo} alt={`${wheel.label} ${shot.view}`}/>)}</div>{wheelShots.map((shot) => <button type="button" className="tire-gauge-action" key={`retake-${shot.view}`} onClick={() => { setShots((items) => items.filter((item) => item.wheel !== index || item.view !== shot.view)); setConfirmed(false); setRetryRequired(false); setError(null); setScanIndex(STEPS.findIndex((step) => step.wheel === index && step.view === shot.view)); }}>Retake {shot.view}</button>)}<button type="button" className="tire-gauge-action" onClick={() => { setGaugeWheel(index); setGaugeSuggestion(null); setError(null); }}>Read gauge with camera</button><label>Confirmed tread (mm)<input type="number" min="0" max="30" step="0.1" inputMode="decimal" value={depths[index]} onChange={(event) => { setDepths((values) => values.map((value, i) => i === index ? event.target.value : value)); setGaugePhotos((values) => values.map((value, i) => i === index ? null : value)); }} placeholder="Optional"/></label></div>;
+          return <div className="tire-wheel-result" key={wheel.short} hidden={selectedWheel !== index}><strong>{wheel.label}</strong>{wheelShots.map((shot) => <span key={shot.view}>{shot.view === "sidewall" ? "Sidewall" : "Tread"}: {shot.result.tire_findings.length ? shot.result.tire_findings.map(findingLabel).join(", ") : "no visible issue"}</span>)}<span className={depths[index] ? "tire-measured" : "tire-not-measured"}>Tread depth: {depths[index] ? `${depths[index]} mm${gaugePhotos[index] ? " (gauge photo, confirmed)" : " (entered)"}` : "not measured"}</span><span className="tire-not-measured">Pressure: not measured</span><div>{wheelShots.map((shot) => <img key={shot.view} src={shot.photo} alt={`${wheel.label} ${shot.view}`}/>)}</div>{wheelShots.map((shot) => <button type="button" className="tire-gauge-action" key={`retake-${shot.view}`} onClick={() => { setShots((items) => items.filter((item) => item.wheel !== index || item.view !== shot.view)); setConfirmed(false); setRetryRequired(false); setError(null); setScanIndex(STEPS.findIndex((step) => step.wheel === index && step.view === shot.view)); }}>Retake {shot.view}</button>)}<button type="button" className="tire-gauge-action" onClick={() => { void voice.speak(`Show the tread-depth gauge reading and unit for the ${wheel.label.toLowerCase()} tire.`); setGaugeWheel(index); setGaugeSuggestion(null); setError(null); }}>Read gauge with camera</button><label>Confirmed tread (mm)<input type="number" min="0" max="30" step="0.1" inputMode="decimal" value={depths[index]} onChange={(event) => { setDepths((values) => values.map((value, i) => i === index ? event.target.value : value)); setGaugePhotos((values) => values.map((value, i) => i === index ? null : value)); }} placeholder="Optional"/></label></div>;
         })}</div>
         <label className="tire-swap-label">Correct tire positions<select value={swapWheel ?? ""} onChange={(event) => setSwapWheel(event.target.value === "" ? null : Number(event.target.value))}><option value="">Choose a tire to swap</option>{WHEELS.map((wheel, index) => <option key={wheel.short} value={index}>{wheel.label}</option>)}</select></label>
         {swapWheel !== null && <div className="tire-swap-actions">{WHEELS.map((wheel, index) => index !== swapWheel && <button type="button" key={wheel.short} onClick={() => { const other = swapWheel; setShots((items) => items.map((shot) => ({ ...shot, wheel: shot.wheel === other ? index : shot.wheel === index ? other : shot.wheel }))); setDepths((values) => values.map((value, i) => i === other ? values[index] : i === index ? values[other] : value)); setGaugePhotos((values) => values.map((value, i) => i === other ? values[index] : i === index ? values[other] : value)); setSwapWheel(null); setConfirmed(false); }}>Swap with {wheel.label}</button>)}</div>}

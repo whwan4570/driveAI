@@ -872,6 +872,8 @@ button.k-row:disabled{opacity:.45;cursor:default}
 .arw-card p{margin:0;color:var(--k-text-2);font-size:14px;line-height:1.5}
 .arw-card.is-waiting{box-shadow:0 0 0 3px #ffb020,0 10px 30px #0006}
 .arw-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.arw-hear{flex:none;display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:var(--k-bg);color:var(--k-brand-text)}
+.arw-hear:focus-visible{outline:2px solid var(--k-brand-text);outline-offset:2px}
 .arw-status{display:flex;align-items:center;gap:6px;color:var(--k-brand-text);font-size:13px;font-weight:700}
 .arw-status.is-done{color:var(--k-success)}
 .arw-card.is-waiting .arw-status{color:var(--k-warning)}

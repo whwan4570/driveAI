@@ -62,9 +62,9 @@ export function App() {
   }
 
   // 처음 한 번의 터치로 TTS·마이크·화면 유지를 켠다. 이후에는 음성과 동작으로 진행한다.
-  const start = async () => {
+  const start = async (ttsAlreadyStarted = false) => {
     if (started) return;
-    voice.unlockTts();
+    if (!ttsAlreadyStarted) voice.unlockTts();
     // With the microphone off in Settings the guide still runs; it just takes taps instead of voice.
     const micAllowed = readPermissionSettings().microphone;
     if (micAllowed) await voice.startListening();
@@ -85,14 +85,17 @@ export function App() {
   };
 
   const startTask = async () => {
+    // Start audible guidance in the user's tap. iOS Safari may block speech
+    // first requested after camera setup and the server round trip.
+    void voice.speak("Show the whole engine bay. I'll find the washer cap.");
+    setScreen("work");
     try {
-      await start();
+      await start(true);
     } catch (error) {
       // 마이크가 막혀도 카메라 관찰 안내는 진행할 수 있다.
       console.warn("Voice input unavailable", error);
       setVoiceReady(false);
     }
-    setScreen("work");
   };
 
   return screen === "home" ? (

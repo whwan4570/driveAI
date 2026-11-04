@@ -659,7 +659,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           <p>Use your vehicle manual to find the cap and check the label. You can save a finished refill from History.</p>
           <button type="button" className="arw-primary" onClick={onDone}>Back to my car</button>
         </> : <>
-          <span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span>
+          <div className="arw-card-top"><span className="arw-status"><span className="arw-dot"/>{anchor ? "Inlet marked" : "Camera setup"}</span><button type="button" className="arw-hear" onClick={() => void voice.speak("Show the whole engine bay. I'll find the washer cap.")} aria-label="Hear camera setup guidance"><Icon name="volume" size={20}/></button></div>
           <h1>{anchor ? "Washer cap found" : !videoSize.width ? "Starting camera…" : searchingInlet ? "Looking for the washer cap…" : searchFinished ? "I couldn't locate the cap" : "Show me the engine bay"}</h1>
           <p>{anchor ? "Starting the guide…" : demoMode ? "Tap the washer cap to start the demo." : "Show the whole engine bay. I’ll find the washer cap."}</p>
           {searchingInlet && <p className="arw-note" role="status">Looking for the washer fluid cap… {inspection?.status === "uncertain" ? ` · ${inspection.observation}` : ""}</p>}
@@ -678,6 +678,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
         </> : <>
           <div className="arw-card-top">
             <span className="arw-status"><span className={`arw-dot${!session.paused ? " pulsing" : ""}`}/>{statusLabel}</span>
+            <button type="button" className="arw-hear" onClick={() => void voice.speak(instruction)} aria-label="Hear current instruction"><Icon name="volume" size={20}/></button>
           </div>
           <h1>{instruction}</h1>
           {session.paused ? <button type="button" className="arw-primary is-wide" onClick={() => void sendIntent(session.session_id, "RESUME", "touch")} disabled={commandPending}>Resume guide</button>
@@ -688,7 +689,7 @@ export function Work({ vehicleId, voiceReady, onDone }: { vehicleId: string; voi
           </div> : session.step === "CONFIRM_PRODUCT" ? <>
             {labelRead && <p className="arw-note" role="status">Read: “{labelRead}”</p>}
             <button type="button" className="arw-secondary is-wide" onClick={() => void scanLabel()} disabled={scanningLabel || session.paused}><Icon name="camera" size={18}/>{scanningLabel ? "Hold it steady…" : "Scan label now"}</button>
-          </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Voice is off. The camera keeps guiding."}</span></div>}
+          </> : <div className="arw-voice"><Waveform active={voiceReady && !session.paused}/><span>{voiceReady ? "Say ‘repeat that’ or ask a question" : "Mic is off. Tap the speaker to hear this step."}</span></div>}
         </>}
       </section>
     </div>
