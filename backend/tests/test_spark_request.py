@@ -45,9 +45,16 @@ def test_empty_reasoning_effort_uses_model_default(monkeypatch):
     assert "reasoning_effort" not in sent[0]
 
 
-def test_photo_inspection_keeps_model_default_effort(monkeypatch):
+def test_photo_inspection_uses_configured_reasoning_effort(monkeypatch):
     sent = capture_requests(monkeypatch, "{}")
     client = MetaSparkClient(Settings(meta_api_key="k", spark_mode="meta"))
+    asyncio.run(client._vision_request("inspect", [b"\xff\xd8x\xff\xd9"]))
+    assert sent[0]["reasoning_effort"] == "low"
+
+
+def test_photo_inspection_can_use_model_default_when_config_is_empty(monkeypatch):
+    sent = capture_requests(monkeypatch, "{}")
+    client = MetaSparkClient(Settings(meta_api_key="k", spark_mode="meta", spark_inspection_reasoning_effort=""))
     asyncio.run(client._vision_request("inspect", [b"\xff\xd8x\xff\xd9"]))
     assert "reasoning_effort" not in sent[0]
 

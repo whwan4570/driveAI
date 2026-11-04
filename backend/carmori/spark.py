@@ -52,7 +52,7 @@ class MetaSparkClient:
         use_reference = reference is not None and step in (Step.OPEN_CAP, Step.FINISH)
         prompt = build_scene_prompt(step, has_reference=use_reference)
         images = [reference, *frames] if use_reference else list(frames)
-        raw = await self._vision_request(prompt, images, reasoning_effort=self.settings.spark_reasoning_effort or None)
+        raw = await self._vision_request(prompt, images, reasoning_effort=self.settings.spark_reasoning_effort or "")
         return parse_scene_answer(raw, fields_for(step))
 
     async def transcribe(self, wav: bytes) -> str:
@@ -90,7 +90,10 @@ class MetaSparkClient:
     async def _vision_request(self, prompt: str, images: Sequence[bytes], *, reasoning_effort: str | None = None) -> str:
         content = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(img).decode('ascii')}"}} for img in images)
-        return await self._request(content, reasoning_effort=reasoning_effort)
+        # Scene analysis supplies its own effort. Photo inspection uses a separate low-latency
+        # setting so cap detection can stay accurate without slowing every guide observation.
+        effort = reasoning_effort if reasoning_effort is not None else self.settings.spark_inspection_reasoning_effort or None
+        return await self._request(content, reasoning_effort=effort)
 
     async def _request(self, content: list[dict], *, reasoning_effort: str | None = None) -> str:
         if not self.settings.meta_api_key:

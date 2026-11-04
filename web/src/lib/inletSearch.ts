@@ -84,7 +84,7 @@ export function snapshotVideo(video: HTMLVideoElement): HTMLCanvasElement {
 export function encodeSearchCrop(canvas: HTMLCanvasElement, roi: Roi): string {
   const crop = document.createElement("canvas");
   const w = canvas.width * roi.w, h = canvas.height * roi.h;
-  const scale = Math.min(1, 1920 / Math.max(w, h));
+  const scale = Math.min(1, 1280 / Math.max(w, h));
   crop.width = Math.round(w * scale);
   crop.height = Math.round(h * scale);
   const context = crop.getContext("2d");

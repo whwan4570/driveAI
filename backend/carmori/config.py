@@ -17,6 +17,8 @@ class Settings:
     spark_timeout_s: float = 20.0
     # 단계 관찰은 짧은 시각 판단이라 추론을 최소로 둔다. 빈 값이면 모델 기본값.
     spark_reasoning_effort: str = "minimal"
+    # 부품 확인은 위치와 주변 구조를 함께 봐야 하므로 별도 저지연 수준을 쓴다.
+    spark_inspection_reasoning_effort: str = "low"
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "https://localhost:5173")
     db_path: str | None = None
     auto_fetch_manuals: bool = False  # from_env enables this for the running app; tests stay offline.
@@ -32,6 +34,7 @@ class Settings:
             spark_audio_model=os.environ.get("SPARK_AUDIO_MODEL", cls.spark_audio_model),
             spark_timeout_s=float(os.environ.get("SPARK_TIMEOUT_S", cls.spark_timeout_s)),
             spark_reasoning_effort=os.environ.get("SPARK_REASONING_EFFORT", cls.spark_reasoning_effort),
+            spark_inspection_reasoning_effort=os.environ.get("SPARK_INSPECTION_REASONING_EFFORT", cls.spark_inspection_reasoning_effort),
             cors_origins=tuple(origins.split(",")) if origins else cls.cors_origins,
             db_path=os.environ.get("CARMORI_DB_PATH") or str(Path(__file__).resolve().parent.parent / "data" / "carmori.sqlite"),
             auto_fetch_manuals=os.environ.get("CARMORI_MANUAL_AUTO_FETCH", "true").lower() not in {"0", "false", "no"},
