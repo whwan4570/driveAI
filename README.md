@@ -68,12 +68,34 @@ The live 2D guidance cue uses local browser image matching between Muse checks, 
 
 | Area | What can be inspected | Evidence |
 | --- | --- | --- |
-| **Usefulness** | A vehicle-specific question, guided refill, and newly saved service record. | [Three-minute demo](#demo-3-minutes), [supported car](#supported-car-and-data-sources) |
+| **Usefulness** | A vehicle-specific question, guided refill, and newly saved service record. | [Three-minute demo](#demo-3-minutes), [early real-car evidence](#early-real-car-evidence-and-scale), [supported car](#supported-car-and-data-sources) |
 | **Meta model integration** | Muse Spark camera analysis, Muse Voice transcription, SAM 3.1 clip endpoint, and the supplied SAM 3D vehicle asset. | [Architecture](#how-the-meta-ai-components-fit-together), [integration scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical execution** | Independent-observation gate, product checks, out-of-order response handling, and provenance-aware records. | [State machine](backend/carmori/state_machine.py), [tests](#tests) |
 | **Demo** | The camera guidance and step transitions in the washer-fluid workflow. | [Demo video](#demo-3-minutes), [demo setup](#demo-setup) |
 
-**Verification boundary:** Automated tests and scripted replays exercise the rules, but they are **not** a measured real-car success rate. The [latest documented test snapshot](#tests) states what passed and what still needs field validation. For a Meta-backed run, the backend must have a valid `META_API_KEY`; `CARMORI_SPARK=meta` enables model-backed observations and `simulated: false` marks the non-demo transition. Without access, the app labels simulated checks rather than presenting them as real detections.
+**Verification boundary:** Automated tests and scripted replays exercise the rules, not real-car recognition. Our [early real-car results](#early-real-car-evidence-and-scale) are team-reported, single-car observations, not a cross-vehicle success rate. The [test snapshot](#tests) separates those results from scripted checks. For a Meta-backed run, the backend must have a valid `META_API_KEY`; `CARMORI_SPARK=meta` enables model-backed observations and `simulated: false` marks the non-demo transition. Without access, the app labels simulated checks rather than presenting them as real detections.
+
+## Early real-car evidence and scale
+
+**Scale is a potential, not a user count.** The U.S. Federal Highway Administration counted **239.8 million licensed drivers** and **297.5 million registered motor vehicles** in 2024 ([driver table](https://www.fhwa.dot.gov/policyinformation/statistics/2024/dl1c.cfm), [vehicle table](https://www.fhwa.dot.gov/policyinformation/statistics/2024/mv1.cfm)). These are broad context figures, not Carmori users or an estimate of people who would use this guide. We start with one simple care job on one verified car. The guide's observation rules and record format can be reused, while each additional vehicle and task needs its own checked manual guidance and real-car testing. **Only the 2014 Sonata has vehicle-specific washer guidance in this prototype.**
+
+**Evidence as of Nov 4, 2026:**
+
+| Evidence | What happened | Limit |
+| --- | --- | --- |
+| Real-car phone use | Before the inlet-search changes, the team reports the washer cap was detected in **0 of 5** attempts. On the updated build, **4 of 4** full, no-touch washer-guide attempts completed on its 2014 Sonata. | Team-reported attempts without timestamped logs. The earlier result measures cap detection; the later result measures full completion. These are not a controlled before/after accuracy test. |
+| Real engine-bay images | Muse Spark returned a visually correct washer-cap location in **2 of 2** supplied photos of the same Sonata. The model calls took **2.8 s** and **4.0 s**. | Still-image spot checks, not end-to-end phone latency or performance across cars and conditions. |
+| Early hands-on feedback | A user reported uncertainty about finding the inlet and unreliable detection. We changed the guide to search the whole engine bay automatically, give movement guidance, and re-search after camera movement. | We have no counted post-change study with that user. |
+| Scripted regression | **16 of 16** workflow replays passed with **0 wrong automatic records**. | Scripted cases test decision rules, not real-car recognition accuracy. |
+
+**What changed after those five failed detections:**
+
+1. The guide searches the whole engine bay automatically, then checks the lower corners if needed. A moving camera no longer leaves it waiting forever; a new view triggers another search.
+2. Muse checks the washer symbol **or** the cap together with its narrow filler neck. Blue color helps find a candidate but cannot verify the cap by itself; coolant, oil and other caps are excluded.
+3. Two distinct camera frames are checked in parallel. The cue appears only when both identify the same cap, and local image tracking carries that verified point to the current view; a lost point is hidden and searched again.
+4. Inspection calls use `low` reasoning and a 1280 px search image to reduce waiting. The **2.8 s** and **4.0 s** figures above are model-call times, not total guide time.
+
+The **0/5** and **4/4** observations show why we changed the guide and that the revised demo now completes, but they measure different outcomes under unlogged conditions. We do not claim an improvement percentage. Future field tests should log every phone attempt, including failures, and measure wrong transitions and time from opening the guide to the first correct cap cue. Four completed runs on one car do not establish performance across vehicles, users, or conditions.
 
 ---
 
@@ -171,10 +193,10 @@ cd backend
 | --- | --- | --- |
 | Backend tests | **177 passed, 1 skipped** | The current automated backend suite passes. |
 | Scripted workflow replay | **16/16 clips passed; 0 wrong automatic records** | The state machine handles the scripted normal and failure cases. This is not a real-car success rate. |
-| Real-car, uninterrupted phone runs | **Not scored yet** | Attempt count, no-tap completion rate, false transitions and first correct cap-cue time still need a measured run. |
+| Real-car, uninterrupted phone runs | **Not scored on Nov 3** | The team-reported Nov 4 attempts appear in [early real-car evidence](#early-real-car-evidence-and-scale). |
 
 
-**Real-clip test set:** [docs/REAL_CLIP_TEST_SET.md](docs/REAL_CLIP_TEST_SET.md) lists 12 cases (14 planned clips), including normal completion, occlusion, a coffee cup, a wrong fluid, a hidden label and an unseen pour. `python -m carmori.annotate --case <id>` asks the model once per frame window and saves the answers. `carmori-replay --report` then writes a results table, and rule changes can be re-checked with no API cost. The scripted fixtures above are **not** a measured real-car success rate. These metrics remain unreported until they are measured in uninterrupted real-car runs.
+**Real-clip test set:** [docs/REAL_CLIP_TEST_SET.md](docs/REAL_CLIP_TEST_SET.md) lists 12 cases (14 planned clips), including normal completion, occlusion, a coffee cup, a wrong fluid, a hidden label and an unseen pour. `python -m carmori.annotate --case <id>` asks the model once per frame window and saves the answers. `carmori-replay --report` then writes a results table, and rule changes can be re-checked with no API cost. The scripted fixtures above are **not** a measured real-car success rate. Broader real-car performance, false-transition counts, and first-cue times remain unmeasured; see the [Nov 4 field note](#early-real-car-evidence-and-scale).
 
 ---
 
