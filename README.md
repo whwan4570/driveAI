@@ -12,34 +12,110 @@ https://github.com/user-attachments/assets/ed7b1a9d-724c-48a9-ab49-3d51deea863e
 
 </p>
 
-*Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo sequence](#demo-3-minutes).*
+*Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo video](#demo-3-minutes).*
 
-Refilling washer fluid is a routine task for all vehicle manufacturers, but just as finding the right cap and checking the product can be difficult for anyone, it can still be challenging and inconvenient for first-timers or those unfamiliar with their vehicle. Camori begins with the complete work on the automobile. Vehicle-specific manuals, camera observations, step-by-step rules, and saved records provide a framework that can be applied to other vehicles after verifying the instructions and recognition for each model.
+**Built during the hackathon.** Everything in this repository was written during the Meta Global AI Developer Hackathon building period, Oct 27 – Nov 4, 2026. The first commit is from Oct 27, and the [commit history](https://github.com/whwan4570/driveAI/commits/main) shows the rest. Meta's models, the 2014 Sonata owner's manual and the public data sources listed [below](#supported-car-and-data-sources) are the outside pieces we used.
 
-**Hackathon demo:** On a 2014 Hyundai Sonata, Carmori finds the washer-fluid cap in the camera view, checks two independent observations before advancing each step, answers spoken questions in the current task context, and saves how the refill was confirmed. The defining moment is opening the cap with both hands while the guide advances without a screen tap.
+## The problem
 
-**[Demo sequence](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
+There is a moment every car owner knows.
+
+The hood is up. The light is going. And the machine you trust with your life every day — the one that took you to work, to the hospital, home for the holidays — is suddenly a stranger. You are standing in front of it, a bottle in one hand and a guess in the other, realizing you don't actually know your own car.
+
+Everything you need exists. It's just never there when you need it.
+
+**The knowledge** is in a manual written for everyone — which means it was written for no one. Not for your model. Not for your engine. Not for this cap, in this light, right now.
+
+**The help** assumes you have a free hand. You don't. Both of yours are holding the job — the cap, the bottle, the work itself. Every tutorial ever made asks you to stop doing the thing in order to learn the thing.
+
+**The check** is nobody's job. The wrong bottle looks exactly like the right one — until coolant is in the washer tank, and a five-minute task becomes a repair bill.
+
+**And the record** — the record is memory. Receipts fade. Memory fades faster. A year from now, no one will know what was done, or when, or whether it was done at all.
+
+So we postpone. We pay strangers for things our own hands could do. We guess, and we forget. And a small, doable act of care becomes one more thing we meant to get to.
+
+## Our solution
+
+**Carmori stands in that moment with you.**
+
+It is an AI companion for the car you actually own — not cars in general, yours. It knows your model and your manual. It watches through your camera while your hands stay on the work. It checks every step before it lets you move on. And when you're done, it remembers — so you never have to.
+
+Each feature answers one of the four problems.
+
+**The knowledge — written for your car, not for everyone.**
+
+- **Meet your car.** Scan the VIN plate, photograph the car, or upload the bill of sale. Carmori reads it once and knows which car is yours — then lets the VIN and the document go. Every answer after that starts from your exact car.
+- **Hear your car.** One tap, and Carmori tells you how your car is doing: what was done, what's due, what last week's rain asked of it — and what it honestly doesn't know yet.
+- **Ask your car.** Talk to Muse by voice or text. It answers from your car's manual and records. When the record is silent, so is it.
+- **Buy the right bottle.** The shelf doesn't know your winter. Carmori checks the coming cold and tells you which freeze rating will hold.
+
+**The help — guidance that never asks for your hands.**
+
+- **A guide that watches.** Mount the phone and work. Carmori sees each step through the camera and speaks the next one. You never touch the screen.
+- **A voice instead of a tap.** Ask in the middle of the job. You speak; the work continues.
+- **Tires, wheel by wheel.** Walk around the car and hold the phone still. Carmori captures the sidewall and the tread of each tire on its own — eight views, no buttons.
+- **Help beyond the hood.** Gas, repairs, car washes and parts stores are one tap away. When you forget where you parked, Find my car points you back. And when CarPlay or Android Auto connects, Carmori can greet you with your car's briefing.
+
+**The check — finally, someone whose job it is.**
+
+- **Two eyes before every step.** The AI never decides alone. Two separate camera observations must agree before any step advances. When the view is unclear, it waits — the way a careful friend would.
+- **The wrong bottle stops everything.** Show coolant, oil or a coffee cup, and pouring stays locked — because some mistakes you only get to make once.
+- **No blurry evidence.** The tire check turns away the blurry, the dark and the crooked. Hold up a tread gauge, and Carmori reads the number — but you confirm it before it counts.
+
+**The record — memory that doesn't fade.**
+
+- **Every job remembers how it was done.** Each record is stamped with its source: seen on camera, or confirmed by you.
+- **Know what's due.** Status keeps every part in one place — washer fluid, tires, oil, brakes, filters, belts — with what was done, when, and what to look at next.
+- **Keep it all in the glove box.** Insurance and registration with renewal reminders, and a care history of every confirmed job, with photos, as a list or a calendar.
+
+**One job, all four answers.** The first complete job — a washer-fluid refill on a 2014 Hyundai Sonata — brings them together:
+
+1. **Find.** There it is — the cap, marked in your camera view. It was always there. You just needed someone who knew your car to point.
+2. **Open.** Both hands on the cap. You never touch the phone. The guide sees it happen and moves on by itself.
+3. **Check.** Show the bottle. If it isn't washer fluid, everything stops.
+4. **Pour. Close.** Carmori watches the pour, and waits until it sees the cap closed. It claims only what it actually saw.
+5. **Remember.** The refill is saved with how it was confirmed. Days later you can ask, "What did I just do?" — and it answers from the record, not from a guess.
+
+Carmori doesn't do the work for you. It makes sure you're never alone while you do it.
+
+## Meta technology we used
+
+We didn't use four Meta models because we could. We used them because that moment in front of the open hood demands four different kinds of attention.
+
+**Muse Spark 1.3** is the attention of someone standing beside you. It watches the live camera two frames at a time — finds the cap, reads the label, checks a tire, reads a VIN plate. And when you ask it a question, it answers only from your car's own records. If it doesn't know, it doesn't invent. That restraint is the feature.
+
+**Muse Voice Transcribe 1.0** is listening, so your hands don't have to stop. You speak; the work continues.
+
+**SAM 3.1** studies what already happened — segmenting and tracking the cap, the bottle, the inlet in uploaded clips. It doesn't drive the live guide, and we won't claim it does.
+
+**SAM 3D** gives the car back to you. The Sonata on Home is a SAM 3D model, generated from a photograph — your car, present on the screen the way it's present in your life.
+
+Every confirmed step in the guide is a real Spark response. Every simulated one is labeled **Demo Mode**. We labeled them because trust is the whole product: a companion that exaggerates what it saw would be worse than no companion at all.
+
+Technology is usually measured by what it can do. We would rather be measured by what it noticed: a cap, a label, a pair of busy hands — and a small job, done right, by the person who owns the car.
+
+*Model-by-model scope: [How the Meta AI components fit together](#how-the-meta-ai-components-fit-together).*
+
+---
 
 **Live prototype:** [Open Carmori](https://driveai-ni3a.onrender.com/) on a phone or desktop. The hosted HTTPS app needs no local setup; allow camera and microphone access to try the guides. The [local setup](#run-it-locally) below is for development and reproduction.
 
-### Why this matters
+**[Demo video](#demo-3-minutes) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
 
-Owners often have to identify an unfamiliar part, read instructions, handle a bottle, and record the work at the same time. A phone guide that watches the task can keep their hands free and avoid claiming a step was completed when the view is unclear. The first audience is owners doing simple, low-risk care themselves; broader maintenance tasks require vehicle-specific validation.
-
-We conceived Carmori as a hands-free product that could become especially useful on camera-equipped devices such as Meta smart glasses: the owner could keep looking at the car and use both hands while receiving guidance. This prototype runs on a phone; smart-glasses integration and its usability have not been tested.
-
-### What judges can verify
+## What judges can verify
 
 | Rubric | Evidence in this prototype | Where to look |
 | --- | --- | --- |
-| **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo sequence](#run-of-show), [supported car and sources](#supported-car-and-data-sources) |
+| **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo video](#demo-3-minutes), [supported car and sources](#supported-car-and-data-sources) |
 | **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Home shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical Depth & Execution (20%)** | A deterministic state machine requires two disjoint observations, rejects stale responses and incompatible products, and records whether completion was observed or user-confirmed. | [Decision rules](#how-the-hands-free-refill-decides), [replay tests](#tests) |
-| **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting care-history record. | [Three-minute run of show](#run-of-show) |
+| **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting care-history record. | [Demo video](#demo-3-minutes) |
 
 The live video should show the **camera scene and the app screen together** at the no-tap transition. A simulated run must be labeled **Demo Mode**; it is not evidence of a successful Meta-backed camera run.
 
 **Stage One proof:** Run with a valid server-side `META_API_KEY` and `CARMORI_SPARK=meta`. The automatic transition response includes `model_version` and `simulated: false`; the guide's evidence card shows the model and the observed condition. Never include the API key in a recording or submission. [`spark.py`](backend/carmori/spark.py) makes the Meta calls; [`main.py`](backend/carmori/main.py) creates the transition event.
+
+## Long-term vision
 
 Car ownership is more than driving. Maintenance history lives in receipts, warnings in the dashboard, instructions in a manual, and the next task on a to-do list. Carmori brings those fragmented moments together so owners can **understand their car, get help while doing the work, and keep a trustworthy record of what happened**.
 
@@ -118,6 +194,8 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 
 ## Demo (3 minutes)
 
+[demo-video]
+
 This is a **vertical slice of the longer-term Carmori experience**, not a claim that every vehicle or maintenance task is supported today. The story starts with what the car knows, moves into a physical task, and ends with a new memory the assistant can recall.
 
 **What to watch for:** the assistant grounds its advice in records; Muse observations inform a hands-free task; the controller validates progression; and the final answer reflects the saved maintenance event. Keep the user's hands and the app screen visible together when the cap opens. Show the model-backed run, not a replay or Demo Mode, as proof of automatic recognition.
@@ -130,20 +208,6 @@ This is a **vertical slice of the longer-term Carmori experience**, not a claim 
 - Backend running with `META_API_KEY`. The top bar shows **Demo Mode** when step checks are simulated. Don't present Demo Mode as real camera recognition.
 - The car is registered as **2014 Hyundai Sonata**, so the Sonata guide is used.
 - Camera, microphone and location are on in **Menu → Settings**.
-
-### Run of show
-
-| Time | Scene | What to show |
-| --- | --- | --- |
-| 0:00–0:20 | In the car, tap **Hear your car summary** on **Home** | A spoken summary from saved records, with captions. |
-| 0:20–0:35 | Tap **Muse** and ask "Why should I check the washer fluid?" | The answer separates known facts from unavailable facts. |
-| 0:35–1:00 | Open **Guide → Washer fluid**, tap **Start guide** and show the engine bay | Carmori searches for the cap; the confirmed cue appears only after visual verification. |
-| 1:00–1:25 | Open the cap with both hands, without touching the phone | The step changes automatically after two independent Muse observations. Open the confirmation card to show the condition and model used. |
-| 1:25–1:50 | Show a readable washer-fluid label; briefly hide it if time permits | The guide waits when it cannot read the label, then proceeds after confirmation. An incompatible product must never unlock pouring. |
-| 1:50–2:20 | Pour, set the bottle upright and show the closed cap | The controller only claims camera observation for actions it saw. An unseen pour requires user confirmation and is recorded differently. |
-| 2:20–3:00 | Open the new record in **Glove box → Care history**; ask Muse "What did I just do?" | Show time, product and completion source, then hear an answer grounded in the new record. |
-
-**Capture guidance:** Use a continuous screen recording and a second camera that shows the real cap and both hands. Cut only between scenes, not across the no-tap opening and automatic transition. Leave genuine model wait time visible. Do not overlay a fabricated success state. If the model pauses for an unclear view, show the recovery rather than editing it into a success.
 
 ---
 
