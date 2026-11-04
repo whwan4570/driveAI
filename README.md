@@ -33,9 +33,9 @@ We conceived Carmori as a hands-free product that could become especially useful
 | Rubric | Evidence in this prototype | Where to look |
 | --- | --- | --- |
 | **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo sequence](#run-of-show), [supported car and sources](#supported-car-and-data-sources) |
-| **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Status shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
+| **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Home shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
 | **Technical Depth & Execution (20%)** | A deterministic state machine requires two disjoint observations, rejects stale responses and incompatible products, and records whether completion was observed or user-confirmed. | [Decision rules](#how-the-hands-free-refill-decides), [replay tests](#tests) |
-| **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting History entry. | [Three-minute run of show](#run-of-show) |
+| **Demo (25%)** | The camera view shows the cap cue, a no-tap step change, uncertainty handling, voice interaction, and the resulting care-history record. | [Three-minute run of show](#run-of-show) |
 
 The live video should show the **camera scene and the app screen together** at the no-tap transition. A simulated run must be labeled **Demo Mode**; it is not evidence of a successful Meta-backed camera run.
 
@@ -64,7 +64,7 @@ We chose **one complete, hands-free care journey** on a **2014 Hyundai Sonata** 
 
 **Brief → Ask → Inspect → Refill → Remember**
 
-Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. Status displays a **team-supplied SAM 3D result for the 2014 Sonata**. We deliberately deferred streaming SAM, automatic SAM 3D generation for arbitrary vehicles, and native spatial AR so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
+Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. Home displays a **team-supplied SAM 3D result for the 2014 Sonata**. We deliberately deferred streaming SAM, automatic SAM 3D generation for arbitrary vehicles, and native spatial AR so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
 
 ---
 
@@ -72,13 +72,15 @@ Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses
 
 | Area | What the user gets |
 | --- | --- |
-| **Home** | A spoken briefing built from saved records, rain over the past 7 days and care rules. Each item shows why it matters and what is still unknown. |
-| **Ask** | Answers from stored facts only. If the model cannot point to a fact, Carmori does not read the answer out. |
-| **Washer refill** (Home or Guide) | A full-screen camera guide: find the inlet, lift the cap, show the bottle, pour, close. Cards and cues appear inside the camera view. |
-| **Guide → Tire check** | An 8-shot visual check (sidewall and tread on each wheel). It rejects blurry, dark or wrong-angle shots. It does not measure tread depth or pressure. |
-| **Status** | Mileage, care status per part and a 3D view of the car. The demo Sonata uses the team's SAM 3D-derived GLB; other vehicles use their own supplied model or a generic fallback. |
-| **Places** | Nearby washer-fluid shops and car washes, the parked-car spot and a Find my car compass view. |
-| **History / Documents** | User-confirmed maintenance records with photos, plus vehicle documents. |
+| **Add your car** | The first screen: scan the VIN plate, photograph the car, upload a bill of sale, buyers guide or window sticker, or enter the details yourself. Photos go to Meta for one-time reading; Carmori does not save the VIN or the document. |
+| **Home** | A 3D view of the car, the last recorded odometer, **Hear your car summary** and suggested checks. The summary is a spoken briefing built from saved records, rain over the past 7 days and care rules; each item shows why it matters and what is still unknown. The demo Sonata uses the team's SAM 3D-derived GLB; other vehicles use their own supplied model or a generic fallback. |
+| **Muse** (top bar) | Ask by voice or text. Answers come from stored facts only. If the model cannot point to a fact, Carmori does not read the answer out. |
+| **Guide → Washer fluid** | A setup screen, then a full-screen camera guide: find the inlet, lift the cap, show the bottle, pour, close. Cards and cues appear inside the camera view. A washer-fluid item in Home's suggested checks opens the same guide. |
+| **Guide → Tire visual check** | An 8-shot visual check (sidewall and tread on each wheel). It rejects blurry, dark or wrong-angle shots. Muse can read a photo of a tread-depth gauge, and you confirm the reading before it is used. Carmori never measures tread depth or pressure from the tire itself. |
+| **Status** | Care status and service history per part, plus driving details (tracked mileage, highway share, rain over 7 days). |
+| **Need washer fluid?** | Shopping help that matches the freeze rating to the forecast low, opened from suggested checks, Status or the washer guide setup. |
+| **Places** | Google Maps shortcuts for gas stations, repair shops, car washes and auto parts stores, your saved stops, and the parked-car spot with a Find my car compass view. |
+| **Glove box** | Driving documents (kept in this browser) and the care history: user-confirmed records with photos, in a list or calendar. |
 | **In the car** | In the iOS and Android shells, the briefing can start when CarPlay or Android Auto connects. |
 
 ## How the Meta AI components fit together
@@ -93,7 +95,7 @@ Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses
 
 **Why separate model perception from workflow decisions?** A visual model can describe what it sees, but maintenance actions need predictable guardrails. Carmori requires agreeing observations, waits when the view is blocked, rejects the wrong product, and records whether an action was visually observed or confirmed by the user. The model provides observations; application logic controls progression.
 
-**The Meta-backed path:** phone camera → Muse Spark scene fields → server validation and state transition → on-screen/voice instruction → evidence-backed History entry. A successful automatic transition returns the previous and next steps, condition, observation and frame IDs, model version, decision time, and measured model processing time. The UI shows a confirmation only after that server event. [Backend transition code](backend/carmori/main.py) and [guide UI](web/src/screens/Work.tsx) implement this boundary. In `fake` mode, the event and UI say **Simulated observation**.
+**The Meta-backed path:** phone camera → Muse Spark scene fields → server validation and state transition → on-screen/voice instruction → evidence-backed care-history record. A successful automatic transition returns the previous and next steps, condition, observation and frame IDs, model version, decision time, and measured model processing time. The UI shows a confirmation only after that server event. [Backend transition code](backend/carmori/main.py) and [guide UI](web/src/screens/Work.tsx) implement this boundary. In `fake` mode, the event and UI say **Simulated observation**.
 
 ### How the hands-free refill decides
 
@@ -133,13 +135,13 @@ This is a **vertical slice of the longer-term Carmori experience**, not a claim 
 
 | Time | Scene | What to show |
 | --- | --- | --- |
-| 0:00–0:20 | In the car, play the briefing on **Home** | A spoken summary from saved records, with captions. |
-| 0:20–0:35 | Ask "Why should I check the washer fluid?" | The answer separates known facts from unavailable facts. |
-| 0:35–1:00 | Start **Refill washer fluid, hands-free** on Home (or **Guide → Washer fluid**) and show the engine bay | Carmori searches for the cap; the confirmed cue appears only after visual verification. |
+| 0:00–0:20 | In the car, tap **Hear your car summary** on **Home** | A spoken summary from saved records, with captions. |
+| 0:20–0:35 | Tap **Muse** and ask "Why should I check the washer fluid?" | The answer separates known facts from unavailable facts. |
+| 0:35–1:00 | Open **Guide → Washer fluid**, tap **Start guide** and show the engine bay | Carmori searches for the cap; the confirmed cue appears only after visual verification. |
 | 1:00–1:25 | Open the cap with both hands, without touching the phone | The step changes automatically after two independent Muse observations. Open the confirmation card to show the condition and model used. |
 | 1:25–1:50 | Show a readable washer-fluid label; briefly hide it if time permits | The guide waits when it cannot read the label, then proceeds after confirmation. An incompatible product must never unlock pouring. |
 | 1:50–2:20 | Pour, set the bottle upright and show the closed cap | The controller only claims camera observation for actions it saw. An unseen pour requires user confirmation and is recorded differently. |
-| 2:20–3:00 | Open the saved History entry; ask "What did I just do?" | Show time, product and completion source, then hear an answer grounded in the new record. |
+| 2:20–3:00 | Open the new record in **Glove box → Care history**; ask Muse "What did I just do?" | Show time, product and completion source, then hear an answer grounded in the new record. |
 
 **Capture guidance:** Use a continuous screen recording and a second camera that shows the real cap and both hands. Cut only between scenes, not across the no-tap opening and automatic transition. Leave genuine model wait time visible. Do not overlay a fabricated success state. If the model pauses for an unclear view, show the recovery rather than editing it into a success.
 
@@ -160,10 +162,10 @@ We **deliberately deferred these integrations** for the three-minute prototype. 
 | Capability | Already in the repository | Integration path we designed | Why it is outside this demo |
 | --- | --- | --- | --- |
 | **Streaming SAM 3.1 tracking** | A [short-MP4 SAM endpoint](backend/carmori/sam_video.py) returns masks and request-scoped track IDs; the live guide uses [local image matching](web/src/lib/localVisualTracking.ts) to move its cue and Muse crop together. | Seed SAM from a Muse-verified frame, stream subsequent frames to a persistent tracker, align each result to its capture time, and hide/reseed the cue when the target is lost. | The uploaded-clip endpoint cannot supply low-latency, frame-aligned live positions. We have not deployed or measured a streaming tracker on a phone-to-GPU connection. |
-| **Automatic SAM 3D generation** | The team supplied a SAM 3D-derived [`demo.glb`](web/public/models/demo.glb), which [Status loads for the 2014 Sonata](web/src/components/StatusVehicle3D.tsx). A separate [GPU-stage script](services/sam3d/generate_splat.py) prepares a splat PLY from a vehicle cutout. | For each new vehicle, run SAM 3D Objects on a Linux/NVIDIA worker, inspect and convert its output into a viewer-ready GLB, then store and attach it to that vehicle. | The bundled Sonata asset is shown now; the automatic per-vehicle GPU job, conversion and publishing pipeline have not been validated. Those steps add cost and waiting time without improving the washer-cap decision. |
+| **Automatic SAM 3D generation** | The team supplied a SAM 3D-derived [`demo.glb`](web/public/models/demo.glb), which [Home loads for the 2014 Sonata](web/src/components/StatusVehicle3D.tsx). A separate [GPU-stage script](services/sam3d/generate_splat.py) prepares a splat PLY from a vehicle cutout. | For each new vehicle, run SAM 3D Objects on a Linux/NVIDIA worker, inspect and convert its output into a viewer-ready GLB, then store and attach it to that vehicle. | The bundled Sonata asset is shown now; the automatic per-vehicle GPU job, conversion and publishing pipeline have not been validated. Those steps add cost and waiting time without improving the washer-cap decision. |
 | **World-anchored AR** | [iOS and Android shells](web/) exist; the current guide is a 2D camera overlay that follows local image matching. | Use native ARKit/ARCore camera pose and anchors with a verified component location, then test alignment across motion, occlusion and different cars. | A 3D vehicle model does not by itself locate a physical cap. Native anchoring and real-car calibration would expand the demo beyond its tested workflow. |
 
-The proposed deployment separates the web/API service from the GPU worker; the existing Capacitor shells provide a path to native iOS/Android delivery. The detailed service boundaries, data flow and validation gates are in [the original integration design (a proposal, not a current-status report)](docs/CARMORI_INTEGRATION_DESIGN.md) and [the SAM 3D stage notes](services/sam3d/README.md). The Sonata asset was supplied as a SAM 3D result and is displayed in Status; the repository does not contain its source image, generation manifest or checkpoint, so its creation cannot be reproduced from this repository alone. The refill arrow is **not** a SAM mask or world anchor. Only the bundled Sonata display is counted as working here, not automatic SAM 3D generation for every registered car.
+The proposed deployment separates the web/API service from the GPU worker; the existing Capacitor shells provide a path to native iOS/Android delivery. The detailed service boundaries, data flow and validation gates are in [the original integration design (a proposal, not a current-status report)](docs/CARMORI_INTEGRATION_DESIGN.md) and [the SAM 3D stage notes](services/sam3d/README.md). The Sonata asset was supplied as a SAM 3D result and is displayed on Home; the repository does not contain its source image, generation manifest or checkpoint, so its creation cannot be reproduced from this repository alone. The refill arrow is **not** a SAM mask or world anchor. Only the bundled Sonata display is counted as working here, not automatic SAM 3D generation for every registered car.
 
 ### Next engineering milestones
 
@@ -269,7 +271,8 @@ The guided refill is tuned for the **2014 Hyundai Sonata (YF, GLS 2.4 GDI)**. Re
 - **Owner's manual** (2014 Sonata, US edition): washer inlet at the front passenger side of the engine bay, next to the coolant reservoir (pp. 4-82, 7-2); check washer fluid at each fill-up (p. 7-5); never add coolant to the washer tank (p. 7-27); warning lights (p. 4-74); tire pressure 34 psi for P205/65R16 and P215/55R17 (p. 8-3). The manual gives no washer tank capacity, so Carmori never states one.
 - **Demo car check (2026-10-29):** the inlet is at the front passenger-side corner, with the translucent coolant reservoir right behind it. Cap color is not used for detection.
 - **Weather:** Open-Meteo rain over the past 7 days. A failed lookup shows as unavailable, never as a made-up value.
-- **Vehicle data:** NHTSA vPIC for VIN decoding and the make/model list. Nearby places come from OpenStreetMap (Overpass).
+- **Vehicle data:** NHTSA vPIC for VIN decoding and the make/model list.
+- **Places:** the optional place-visit prompt looks up nearby gas stations, repair shops and car washes in OpenStreetMap (Overpass). The Places shortcuts open Google Maps searches.
 - **Car photo:** a 2013 Sonata GLS photo under CC BY-SA 4.0 ([credits](web/public/CREDITS.md)).
 
 ---
@@ -300,8 +303,11 @@ cd backend
 
 ## API
 
+Paths are relative to the API root. On the hosted site and through the Vite dev proxy that root is `/api` (for example `/api/health`); `carmori.main:app` run on its own serves them at `/`. FastAPI's interactive docs are at `/api/docs` on the hosted site.
+
 | Route | Purpose |
 | --- | --- |
+| `GET /health` | Model name, Demo Mode and vision status |
 | `POST /vehicles`, `GET/PATCH /vehicles/{id}` | Add, read and edit a car |
 | `POST /vehicles/recognize`, `POST /vehicles/recognize-document` | Read a VIN plate, car photo or document |
 | `GET /vehicles/{id}/care-recommendations` | Care priorities with reasons and weather status |
@@ -332,6 +338,6 @@ docs/              design notes and the real-clip test set
 - Photo checks (inlet, label, tire) take several seconds each. Live step checks depend on network and model speed.
 - Carmori does not measure fluid level, amount poured, tread depth or tire pressure. It shows what is visible and saves gauge readings you enter.
 - The inlet cue follows local image matching while the target remains visible. Fast camera movement, occlusion and a changed cap appearance can force a new Muse search. The [streaming SAM and spatial AR plan](#deliberately-deferred-streaming-sam-and-spatial-ar) is intentionally outside this demo.
-- SAM 3.1 track IDs last only for one uploaded clip request. The Sonata's bundled SAM 3D-derived GLB displays in Status, but the [automatic generation and publishing path](#deliberately-deferred-streaming-sam-and-spatial-ar) has not been run end to end in this repository.
+- SAM 3.1 track IDs last only for one uploaded clip request. The Sonata's bundled SAM 3D-derived GLB displays on Home, but the [automatic generation and publishing path](#deliberately-deferred-streaming-sam-and-spatial-ar) has not been run end to end in this repository.
 - Without a working Meta key (billing or model access), photo checks, automatic steps and transcription are unavailable. The app says so and never records a step it didn't see. Manual records still work.
-- This is a local prototype with no accounts. The browser remembers the car ID in `localStorage`. Add sign-in and ownership checks before any public deployment.
+- There are no accounts. The browser remembers the car ID in `localStorage`, and the hosted demo has no sign-in or ownership checks, so don't enter personal data there. Add sign-in and ownership checks before real owners rely on it.
