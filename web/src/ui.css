@@ -53,3 +53,5 @@
 .picker-footer{flex-shrink:0;border-top:1px solid #edf2f4;margin-top:8px;padding-top:4px}.picker-footer .picker-other{padding:12px 0;min-height:44px}.picker-footer .picker-manual{padding:6px 0 0}
 
 .service-status-overlay{align-items:center;padding:16px}.service-status-dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;border-radius:18px;width:min(100%,430px)}
+/* Brief automatic brand screen, once per app load. */
+.carmori-splash{display:grid;place-items:center;max-width:440px;min-height:100svh;margin:0 auto;padding:28px;background:#f8fafb;color:#19383e;animation:carmori-splash-out .2s ease 1.3s forwards}.carmori-splash h1{font-size:46px;letter-spacing:-2px;font-weight:650;line-height:1;margin:0}.carmori-splash h1 span{color:#087f89}@keyframes carmori-splash-out{to{opacity:0}}@media(prefers-reduced-motion:reduce){.carmori-splash{animation:none}}

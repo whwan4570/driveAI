@@ -24,6 +24,12 @@ export function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [started, setStarted] = useState(false);
   const [voiceReady, setVoiceReady] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowSplash(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -35,6 +41,10 @@ export function App() {
     });
     return () => { active = false; };
   }, [vehicleId]);
+
+  if (showSplash) {
+    return <main className="carmori-splash" aria-label="Carmori"><h1>Carmori<span>.</span></h1></main>;
+  }
 
   if (!vehicleId) {
     return (
