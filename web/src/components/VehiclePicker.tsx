@@ -28,6 +28,11 @@ export function VehiclePicker({ make, model, year, onChange }: {
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState("");
   const cache = useRef(new Map<string, ModelList>());
+  const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState<{ top: number; height: number } | null>(null);
+
+  useEffect(() => { if (listRef.current) listRef.current.scrollTop = 0; }, [query, sheet]);
 
   useEffect(() => {
     if (sheet !== "make" || makes) return;
@@ -53,11 +58,30 @@ export function VehiclePicker({ make, model, year, onChange }: {
 
   useEffect(() => {
     if (!sheet) return;
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setSheet(null); };
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setSheet(null);
+      if (event.key !== "Tab") return;
+      const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input') ?? [])];
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    const updateViewport = () => setViewport(window.visualViewport ? { top: window.visualViewport.offsetTop, height: window.visualViewport.height } : null);
+    updateViewport();
+    window.visualViewport?.addEventListener("resize", updateViewport);
+    window.visualViewport?.addEventListener("scroll", updateViewport);
+    dialogRef.current?.querySelector<HTMLButtonElement>(".picker-close")?.focus({ preventScroll: true });
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKey);
-    return () => { document.body.style.overflow = overflow; document.removeEventListener("keydown", onKey); };
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener("keydown", onKey);
+      window.visualViewport?.removeEventListener("resize", updateViewport);
+      window.visualViewport?.removeEventListener("scroll", updateViewport);
+      previousFocus?.focus({ preventScroll: true });
+    };
   }, [sheet]);
 
   const open = (next: Sheet) => { setQuery(""); setTyping(false); setTyped(""); setSheet(next); };
@@ -89,8 +113,8 @@ export function VehiclePicker({ make, model, year, onChange }: {
       <div className="picker-field"><span>Model</span><button type="button" className={`picker-button${model ? "" : " empty"}`} onClick={() => open(make ? "model" : "make")} aria-haspopup="dialog"><span>{model || "Select"}</span><Icon name="chevron" size={16}/></button></div>
     </div>
 
-    {sheet && createPortal(<div className="picker-backdrop" onClick={() => setSheet(null)}>
-      <div className="picker-sheet" role="dialog" aria-modal="true" aria-label={sheet === "make" ? "Choose make" : `Choose ${make} model`} onClick={(event) => event.stopPropagation()}>
+    {sheet && createPortal(<div className="picker-backdrop" style={viewport ? { top: viewport.top, height: viewport.height, bottom: "auto" } : undefined} onClick={() => setSheet(null)}>
+      <div ref={dialogRef} className="picker-sheet" role="dialog" aria-modal="true" aria-label={sheet === "make" ? "Choose make" : `Choose ${make} model`} onClick={(event) => event.stopPropagation()}>
         <div className="picker-header">
           {sheet === "model" ? <button type="button" className="picker-back" onClick={() => open("make")} aria-label="Back to makes"><Icon name="chevron" size={20}/></button> : <span/>}
           <div><strong>{sheet === "make" ? "Choose make" : `${make} models`}</strong>{sheet === "model" && <small>{year ? `${year} model year` : "All years · add the model year to narrow this list"}</small>}</div>
@@ -99,7 +123,7 @@ export function VehiclePicker({ make, model, year, onChange }: {
 
         {!manualOnly && <input className="picker-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => holdEnter(event)} placeholder={sheet === "make" ? "Search makes" : "Search models"} aria-label={sheet === "make" ? "Search makes" : "Search models"}/>}
 
-        <div className="picker-body">
+        <div ref={listRef} className="picker-body">
           {sheet === "make" && <>
             {!makes && <p className="picker-note">Loading makes…</p>}
             {makes && !search && makes.popular.length > 0 && <div className="picker-chips" role="group" aria-label="Popular makes">{makes.popular.map((name) => <button type="button" key={name} className={sameName(name, make) ? "selected" : ""} onClick={() => chooseMake(name)}>{name}</button>)}</div>}
@@ -114,6 +138,8 @@ export function VehiclePicker({ make, model, year, onChange }: {
             {modelList.status === "available" && modelOptions.length === 0 && <p className="picker-note">No matching model.</p>}
           </>}
 
+        </div>
+        <div className="picker-footer">
           {(typing || manualOnly) ? <div className="picker-manual">
             <input value={typed} onChange={(event) => setTyped(event.target.value)} onKeyDown={(event) => holdEnter(event, submitTyped)} maxLength={60} placeholder={sheet === "make" ? "Enter make" : "Enter model"} aria-label={sheet === "make" ? "Enter make" : "Enter model"} autoFocus/>
             <button type="button" className="primary" onClick={submitTyped} disabled={!typed.trim()}>Use</button>
