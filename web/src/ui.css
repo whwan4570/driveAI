@@ -51,3 +51,5 @@
 .picker-body{overflow-y:scroll;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#087f89 #edf3f4;overflow-anchor:none}
 .picker-body::-webkit-scrollbar{width:6px}.picker-body::-webkit-scrollbar-thumb{background:#087f89;border-radius:6px}.picker-body::-webkit-scrollbar-track{background:#edf3f4}
 .picker-footer{flex-shrink:0;border-top:1px solid #edf2f4;margin-top:8px;padding-top:4px}.picker-footer .picker-other{padding:12px 0;min-height:44px}.picker-footer .picker-manual{padding:6px 0 0}
+
+.service-status-overlay{align-items:center;padding:16px}.service-status-dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;border-radius:18px;width:min(100%,430px)}

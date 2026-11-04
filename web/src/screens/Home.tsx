@@ -115,7 +115,10 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const assistantReturnRef = useRef<Tab>("home");
   const shoppingReturnRef = useRef<Tab>("home");
   const [guideSetupOpen, setGuideSetupOpen] = useState(false);
+  const [tireSetupOpen, setTireSetupOpen] = useState(false);
   const [briefingText, setBriefingText] = useState("");
+  const briefingRunRef = useRef(0);
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"menu" | "about" | "settings">("menu");
   const menuPanelRef = useRef<HTMLElement | null>(null);
@@ -359,6 +362,8 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     setServiceRequest(null);
     setComposerMenuOpen(false);
     setGuideSetupOpen(false);
+    setTireSetupOpen(false);
+    setTireOpen(false);
     setProfileOpen(false);
     setNotificationsOpen(false);
     setMenuOpen(false);
@@ -376,6 +381,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
   const openVehicleEditor = (origin: "menu" | "home" | "history") => { profileOriginRef.current = origin; closeMenu(); setProfileOpen(true); };
   const closeVehicleEditor = () => { setProfileOpen(false); if (profileOriginRef.current === "menu") openMenu(); };
   const prepareWasherGuide = () => { goToTab("guide"); setTireOpen(false); setGuideSetupOpen(true); };
+  const prepareTireGuide = () => { goToTab("guide"); setTireSetupOpen(true); };
 
   const openDocuments = () => {
     setDocumentKind(undefined);
@@ -396,8 +402,18 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     goToTab("history");
   };
 
+  const stopBriefing = () => {
+    briefingRunRef.current += 1;
+    voice.cancelSpeech();
+    if (carConnectionAvailable) void CarConnection.stopSpeaking().catch(() => undefined);
+    setBriefingState("idle");
+    setBusy(false);
+    busyRef.current = false;
+  };
+
   const playBriefing = async (source: "manual" | "auto" | "car") => {
     if (busyRef.current) return;
+    const run = ++briefingRunRef.current;
     busyRef.current = true;
     setError(null);
     setBusy(true);
@@ -405,6 +421,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
     if (source === "manual") voice.unlockTts();
     try {
       const { text } = await api.briefing(vehicleId);
+      if (run !== briefingRunRef.current) return;
       setBriefingText(text);
       setBriefingState("speaking");
       if (source === "car") {
@@ -415,15 +432,19 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
       } else {
         await say(text);
       }
+      if (run !== briefingRunRef.current) return;
       if (source === "manual") gateRef.current.markPlayed();
       setBriefingState("played");
       if (source === "auto") setAutoMessage("Played for this drive");
     } catch {
+      if (run !== briefingRunRef.current) return;
       setBriefingState("idle");
       setError("Could not play the briefing. Check your connection and try again.");
     } finally {
-      setBusy(false);
-      busyRef.current = false;
+      if (run === briefingRunRef.current) {
+        setBusy(false);
+        busyRef.current = false;
+      }
     }
   };
   playBriefingRef.current = playBriefing;
@@ -736,7 +757,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
         <div className="notifications-heading"><div><strong>Notifications</strong></div><button type="button" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><Icon name="close" size={16}/></button></div>
         {(careLoading || documentsLoading) && <p className="notifications-empty">Checking saved records…</p>}
         {!careLoading && !documentsLoading && notificationItems.length + documentAlerts.length === 0 && <p className="notifications-empty">No items need your attention in saved records.</p>}
-        {!careLoading && notificationItems.map((item) => <button className="notification-item" type="button" key={item.id} onClick={() => openNotification(item.component)}><span className={`notification-dot ${item.priority === "WARNING" ? "warning" : "caution"}`}/><span><strong>{item.title}</strong><small>{item.priority === "WARNING" ? "Warning" : item.priority === "CHECK_SOON" ? "Check soon" : "Needs information"}</small></span><Icon name="chevron" size={15}/></button>)}
+        {!careLoading && notificationItems.map((item) => <button className="notification-item" type="button" key={item.id} onClick={() => { if (item.component === "washer_fluid") prepareWasherGuide(); else if (item.component === "tires") prepareTireGuide(); else openNotification(item.component); }}><span className={`notification-dot ${item.priority === "WARNING" ? "warning" : "caution"}`}/><span><strong>{item.title}</strong><small>{item.priority === "WARNING" ? "Warning" : item.priority === "CHECK_SOON" ? "Check soon" : "Needs information"}</small></span><Icon name="chevron" size={15}/></button>)}
         {documentAlerts.map(({ record, reminder }) => <button className="notification-item" type="button" key={`document-${record.kind}`} onClick={openDocuments}><span className={`notification-dot ${reminder.urgent ? "warning" : "caution"}`}/><span><strong>{DOCUMENT_KINDS.find((item) => item.kind === record.kind)?.label} renewal</strong><small>{reminder.label}</small></span><Icon name="chevron" size={15}/></button>)}
         <p className="notifications-footnote">Live dashboard alerts are not connected.</p>
       </section>}
@@ -750,13 +771,13 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
           <Suspense fallback={<div className="status-3d-loading">Loading vehicle view…</div>}><StatusVehicle3D vehicle={vehicle} records={records} care={shownStatusCare} loading={memoryLoading || careLoading} samplePreview={samplePreview} showHeader={false} onViewDetails={openServiceDetail}/></Suspense>
           <div className="overview-mileage"><strong>{vehicle?.odometer_km == null ? "—" : Math.round(vehicle.odometer_km / 1.609344).toLocaleString()} {vehicle?.odometer_km == null ? "" : "mi"}</strong><small>{vehicle?.odometer_km == null ? "Add odometer in My vehicle" : "Last recorded odometer"}</small></div>
         </section>
-        <section className="overview-briefing" aria-label="Your car summary"><Icon name="volume" size={20}/><div><strong>Hear your car summary</strong><small role="status">{briefingState === "loading" ? "Preparing your summary…" : briefingState === "speaking" ? "Speaking · Tap Stop to end" : "Saved records & suggested checks"}</small></div><button type="button" onClick={() => briefingState === "speaking" ? voice.cancelSpeech() : void playBriefing("manual")} disabled={briefingState === "loading" || (busy && briefingState !== "speaking")} aria-label={briefingState === "speaking" ? "Stop summary" : "Play car summary"}>{briefingState === "speaking" ? "Stop" : <Icon name="play" size={20}/>}</button></section>
+        <section className="overview-briefing" aria-label="Your car summary"><Icon name="volume" size={20}/><div><strong>Hear your car summary</strong><small role="status">{briefingState === "loading" ? "Preparing your summary…" : briefingState === "speaking" ? "Speaking · Tap Stop to end" : "Saved records & suggested checks"}</small></div><button type="button" onClick={() => briefingState === "loading" || briefingState === "speaking" ? stopBriefing() : void playBriefing("manual")} disabled={busy && briefingState !== "loading" && briefingState !== "speaking"} aria-label={briefingState === "loading" || briefingState === "speaking" ? "Stop reading summary" : "Play car summary"}>{briefingState === "loading" || briefingState === "speaking" ? <span aria-hidden="true">■</span> : <Icon name="play" size={20}/>}</button></section>
         {briefingText && <details className="overview-transcript"><summary>Read the summary</summary><p>{briefingText}</p></details>}
         <section className="k-block is-list overview-checks" aria-label="Suggested checks">
           <div className="k-block-head"><h2 className="k-h2">Suggested checks</h2><button className="k-block-link" type="button" onClick={() => goToTab("status")}>View all<Icon name="chevron" size={14}/></button></div>
           {careLoading && <p className="k-note" role="status">Checking saved records…</p>}
           {!careLoading && notificationItems.length === 0 && <p className="k-note">Nothing to review in your saved records.</p>}
-          {notificationItems.slice(0, 2).map((item) => <div key={item.id}><button className="k-row" type="button" onClick={() => openNotification(item.component)}><span className={`k-row-art ${item.component}`}><Icon name={item.component === "washer_fluid" ? "droplets" : item.component === "tires" ? "tire" : "status"} size={21}/></span><span className="k-row-main"><strong>{item.title}</strong><small>{item.last_recorded_at ? `Last recorded ${new Date(item.last_recorded_at).toLocaleDateString("en-US", { dateStyle: "medium" })}` : "No confirmed record yet"}</small></span><span className={`k-badge ${PRIORITY_TONE[item.priority]}`}>{priorityLabel(item.priority)}</span><Icon className="k-row-trail" name="chevron" size={15}/></button>{item.component === "washer_fluid" && <button className="muse-product-suggestion" type="button" onClick={() => openShopping("home")}><Icon name="spark" size={13}/><span>Explore fluid options with Muse</span><Icon name="chevron" size={12}/></button>}</div>)}
+          {notificationItems.slice(0, 2).map((item) => <div key={item.id}><button className="k-row" type="button" onClick={() => { if (item.component === "washer_fluid") prepareWasherGuide(); else if (item.component === "tires") prepareTireGuide(); else openNotification(item.component); }}><span className={`k-row-art ${item.component}`}><Icon name={item.component === "washer_fluid" ? "droplets" : item.component === "tires" ? "tire" : "status"} size={21}/></span><span className="k-row-main"><strong>{item.title}</strong><small>{item.last_recorded_at ? `Last recorded ${new Date(item.last_recorded_at).toLocaleDateString("en-US", { dateStyle: "medium" })}` : "No confirmed record yet"}</small></span><span className={`k-badge ${PRIORITY_TONE[item.priority]}`}>{priorityLabel(item.priority)}</span><Icon className="k-row-trail" name="chevron" size={15}/></button>{item.component === "washer_fluid" && <button className="muse-product-suggestion" type="button" onClick={() => openShopping("home")}><Icon name="spark" size={13}/><span>Explore fluid options with Muse</span><Icon name="chevron" size={12}/></button>}</div>)}
         </section>
       </div>}
 
@@ -802,7 +823,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
       </>}
 
       {!profileOpen && tab === "guide" && <div className="k-home">
-        {!tireOpen && !guideSetupOpen && <>
+        {!tireOpen && !guideSetupOpen && !tireSetupOpen && <>
           <header className="k-hero"><h1 className="k-title">Guide</h1><p className="k-lead">Step-by-step checks with your phone</p></header>
           <section className="k-block is-list" aria-label="Guided checks">
             <button className="k-row" type="button" onClick={prepareWasherGuide} disabled={busy}>
@@ -810,7 +831,7 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
               <span className="k-row-main"><strong>Washer fluid</strong><small>{perms.camera ? "Find the inlet, check the product, refill hands-free" : "Camera is off in Settings"}</small></span>
               <Icon className="k-row-trail" name="chevron" size={18}/>
             </button>
-            <button className="k-row" type="button" onClick={() => setTireOpen(true)}>
+            <button className="k-row" type="button" onClick={prepareTireGuide}>
               <span className="k-row-art"><Icon name="status" size={22}/></span>
               <span className="k-row-main"><strong>Tire visual check</strong><small>Check all four tires with automatic sidewall and tread scans</small></span>
               <Icon className="k-row-trail" name="chevron" size={18}/>
@@ -818,7 +839,8 @@ export function Home({ vehicleId, started, onStart, onStop, onStartTask }: {
           </section>
         </>}
         {guideSetupOpen && <section className="guide-setup"><button className="context-back" type="button" onClick={() => setGuideSetupOpen(false)}>‹ Guide</button><h1>Washer-fluid guide</h1><p>Set up once, then follow the hands-free steps.</p><ol><li><strong>Position your phone</strong><span>Keep your hands, cap and bottle in view.</span></li><li><strong>Camera & microphone</strong><span>Camera is required. Microphone enables voice questions.</span></li><li><strong>Follow the spoken steps</strong><span>Unclear observations stay on the current step.</span></li></ol>{demoMode && <p className="sample-preview-banner">Demo Mode simulates observations. It does not verify real work.</p>}<button className="primary action-button" type="button" onClick={() => perms.camera ? void beginTask() : openSettings()} disabled={busy}>{busy ? "Starting…" : perms.camera ? demoMode ? "Start demo guide" : "Start guide" : "Enable camera in Settings"}</button><button className="k-block-link" type="button" onClick={() => openShopping("guide")}><Icon name="spark" size={16}/>Need a product? Ask Muse</button></section>}
-        {tireOpen && vehicle && <TireVisualGuide vehicle={vehicle} onSaved={() => { setTireOpen(false); void refreshData(); goToTab("history"); }} onCancel={() => setTireOpen(false)}/>}
+        {tireSetupOpen && <section className="guide-setup"><button className="context-back" type="button" onClick={() => setTireSetupOpen(false)}>‹ Guide</button><h1>Tire visual check</h1><p>Get ready, then check all four tires one at a time.</p><ol><li><strong>Walk around your parked car</strong><span>Keep the car stationary and make sure you can safely reach each wheel.</span></li><li><strong>Capture sidewall & tread views</strong><span>Follow the camera prompts for two views per tire—eight views in total. You can also upload photos.</span></li><li><strong>Review and save your observations</strong><span>Retake unclear views before saving. Photos do not measure tire pressure or tread depth.</span></li></ol>{demoMode && <p className="sample-preview-banner">Demo Mode uses simulated analysis. It does not verify real tire condition.</p>}<button className="primary action-button" type="button" onClick={() => { setTireSetupOpen(false); setTireOpen(true); }} disabled={busy}>Start tire check</button></section>}
+        {tireOpen && vehicle && <TireVisualGuide vehicle={vehicle} onSaved={() => { setTireOpen(false); void refreshData(); goToTab("history"); }} onCancel={() => { setTireOpen(false); setTireSetupOpen(true); }}/>}
       </div>}
 
       {!profileOpen && tab === "history" && <div className="k-home">
