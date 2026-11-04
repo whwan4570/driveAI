@@ -60,11 +60,16 @@ function patchContrast(frame: TrackingFrame, x: number, y: number, radius: numbe
 export function trackPointLocally(previous: TrackingFrame, current: TrackingFrame, point: TrackingPoint): TrackingPoint | null {
   if (previous.width !== current.width || previous.height !== current.height) return null;
   const { width, height } = current;
-  const radius = Math.max(7, Math.round(Math.min(width, height) * 0.038));
+  let radius = Math.max(7, Math.round(Math.min(width, height) * 0.038));
   const fromX = Math.round(point.x * width);
   const fromY = Math.round(point.y * height);
   if (fromX < radius || fromY < radius || fromX + radius >= width || fromY + radius >= height) return null;
-  if (patchContrast(previous, fromX, fromY, radius) < 8) return null;
+  // A cap's center can be plain blue. Include its rim/neck before declaring it untrackable.
+  if (patchContrast(previous, fromX, fromY, radius) < 8) {
+    const contextRadius = radius * 2;
+    if (fromX < contextRadius || fromY < contextRadius || fromX + contextRadius >= width || fromY + contextRadius >= height || patchContrast(previous, fromX, fromY, contextRadius) < 8) return null;
+    radius = contextRadius;
+  }
   // A stationary phone should keep the verified cue without searching for a lookalike part.
   if (patchError(previous, current, fromX, fromY, fromX, fromY, radius) < 4) return point;
   // Keep an even radius so the two-pixel search grid includes zero displacement.
@@ -84,5 +89,50 @@ export function trackPointLocally(previous: TrackingFrame, current: TrackingFram
   }
   // A large appearance change or several equally plausible locations means the cue is lost.
   if (best.error > 32 || (runnerUp < Infinity && runnerUp - best.error < 1.8)) return null;
+  return { x: best.x / width, y: best.y / height };
+}
+
+/** Color is only a tracking cue for a cap already verified by AI, never an identity check. */
+export function trackVerifiedInlet(previous: TrackingFrame, current: TrackingFrame, point: TrackingPoint): TrackingPoint | null {
+  if (previous.width !== current.width || previous.height !== current.height) return null;
+  const { width, height } = previous;
+  const cx = Math.round(point.x * width), cy = Math.round(point.y * height);
+  const blue = (frame: TrackingFrame, x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    const r = frame.pixels[i], g = frame.pixels[i + 1], b = frame.pixels[i + 2];
+    return b > r + 12 && b > g * 1.06 && b > 35;
+  };
+  const radius = Math.max(8, Math.round(Math.min(width, height) * .065));
+  let oldBlue = 0;
+  for (let y = Math.max(0, cy - radius); y <= Math.min(height - 1, cy + radius); y++) for (let x = Math.max(0, cx - radius); x <= Math.min(width - 1, cx + radius); x++) if (blue(previous, x, y)) oldBlue++;
+  if (oldBlue < Math.max(8, (2 * radius + 1) ** 2 * .35)) return trackPointLocally(previous, current, point);
+  const search = Math.max(16, Math.round(Math.min(width, height) * .14));
+  const x0 = Math.max(0, cx - search), x1 = Math.min(width - 1, cx + search);
+  const y0 = Math.max(0, cy - search), y1 = Math.min(height - 1, cy + search);
+  const seen = new Set<number>();
+  const candidates: { x: number; y: number; count: number; distance: number }[] = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const start = y * width + x;
+    if (seen.has(start) || !blue(current, x, y)) continue;
+    const queue = [start]; seen.add(start);
+    let sumX = 0, sumY = 0, count = 0, edge = false;
+    for (let i = 0; i < queue.length; i++) {
+      const px = queue[i] % width, py = Math.floor(queue[i] / width);
+      sumX += px; sumY += py; count++;
+      if (px === 0 || py === 0 || px === width - 1 || py === height - 1 || px === x0 || px === x1 || py === y0 || py === y1) edge = true;
+      for (const [nx, ny] of [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]]) {
+        const key = ny * width + nx;
+        if (nx < x0 || nx > x1 || ny < y0 || ny > y1 || seen.has(key) || !blue(current, nx, ny)) continue;
+        seen.add(key); queue.push(key);
+      }
+    }
+    if (!edge && count >= Math.max(8, oldBlue * .25) && count <= oldBlue * 5) {
+      const x = sumX / count, y = sumY / count;
+      candidates.push({ x, y, count, distance: Math.hypot(x - cx, y - cy) });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  const best = candidates[0];
+  if (!best || (candidates[1] && candidates[1].distance - best.distance < 6)) return null;
   return { x: best.x / width, y: best.y / height };
 }
