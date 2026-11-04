@@ -1,149 +1,75 @@
-
-
 # Carmori
 
-**A hands-free car-care guide that sees the task, helps you finish it, and remembers what happened.**
+**A hands-free AI car-care companion that helps you complete a maintenance task and remembers what happened.**
 
-<p align="center">
+Built for the **Meta Global AI Developer Hackathon (October 27–November 4, 2026)**. Carmori combines Meta's multimodal models with a rule-based workflow controller and vehicle-specific maintenance history. See the [commit history](https://github.com/whwan4570/driveAI/commits/main) for development activity.
 
+**[3-minute demo](#demo-3-minutes) · [Live prototype](https://driveai-ni3a.onrender.com/) · [How it works](#how-the-meta-ai-components-fit-together) · [Tests](#tests) · [Run locally](#run-it-locally)**
 
+## Demo (3 minutes)
 
-https://github.com/user-attachments/assets/ed7b1a9d-724c-48a9-ab49-3d51deea863e
+https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
 
+**[Watch in full quality on YouTube](https://youtu.be/ciQin_Bnydw)**
 
+The demo follows one maintenance task on a **2014 Hyundai Sonata**: review the car's information, ask a question, use the camera-guided washer-fluid refill, and save the completed task to vehicle history. The goal is to demonstrate an end-to-end experience, not claim support for every car or repair.
 
-</p>
-
-*Promo film. App screens were captured from the current build; the smart-glasses scene is our vision with Meta, not a shipped feature. For the unedited, Meta-backed run, see the [demo video](#demo-3-minutes).*
-
-**Built during the hackathon.** Everything in this repository was written during the Meta Global AI Developer Hackathon building period, Oct 27 – Nov 4, 2026. The first commit is from Oct 27, and the [commit history](https://github.com/whwan4570/driveAI/commits/main) shows the rest. Meta's models, the 2014 Sonata owner's manual and the public data sources listed [below](#supported-car-and-data-sources) are the outside pieces we used.
+**Live demo vs. concept:** This [promotional video](https://github.com/user-attachments/assets/ed7b1a9d-724c-48a9-ab49-3d51deea863e) includes a smart-glasses concept scene. AI-glasses integration and world-anchored AR are future work, not features in this prototype. The app labels simulated camera checks **Demo Mode**. An actual model-backed run requires Meta API access.
 
 ## The problem
 
-There is a moment every car owner knows.
+Car manuals and repair videos can explain a task, but they cannot see the part in front of you or check whether you completed a step correctly. This is especially inconvenient during simple jobs when both hands are occupied. Maintenance history is often scattered across receipts, reminders, and memory.
 
-The hood is up. The light is going. And the machine you trust with your life every day — the one that took you to work, to the hospital, home for the holidays — is suddenly a stranger. You are standing in front of it, a bottle in one hand and a guess in the other, realizing you don't actually know your own car.
+Carmori is our attempt to connect those pieces: identify the owner's vehicle, guide a physical task using camera observations and voice, then keep a record that can inform the next interaction.
 
-Everything you need exists. It's just never there when you need it.
+## What we built
 
-**The knowledge** is in a manual written for everyone — which means it was written for no one. Not for your model. Not for your engine. Not for this cap, in this light, right now.
+- **Vehicle-specific assistance:** Add a car using a VIN photo, vehicle photo, document, or manual entry. Ask questions grounded in the car's available information and saved records.
+- **Hands-free washer-fluid guide:** A phone camera follows `FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED`, with on-screen cues and spoken assistance.
+- **Evidence-based step changes:** The FastAPI workflow controller advances only after two separate, non-overlapping visual observations agree. Unclear frames, wrong products, and stale responses do not count as a completed step.
+- **Maintenance memory:** Save a completed refill with the source of confirmation, distinguishing `observed_sequence` from `user_voice_confirmed` or a manual entry. Carmori can reference the saved event later.
+- **Additional prototype features:** An eight-view tire visual check, service history, owner briefings, nearby car-care links, a glove-box view, and a 3D view of the demo vehicle.
 
-**The help** assumes you have a free hand. You don't. Both of yours are holding the job — the cap, the bottle, the work itself. Every tutorial ever made asks you to stop doing the thing in order to learn the thing.
+## How the core workflow works
 
-**The check** is nobody's job. The wrong bottle looks exactly like the right one — until coolant is in the washer tank, and a five-minute task becomes a repair bill.
+```text
+Phone camera → Muse Spark 1.3 → structured scene observations
+                                     ↓
+                           FastAPI state machine
+                           checks agreement, order,
+                           product, and visibility
+                                     ↓
+                       Next instruction / completion
+                                     ↓
+                     Evidence-backed maintenance record
 
-**And the record** — the record is memory. Receipts fade. Memory fades faster. A year from now, no one will know what was done, or when, or whether it was done at all.
+Spoken input → Muse Voice Transcribe 1.0 → voice actions
+             (cannot override visual safety checks)
+```
 
-So we postpone. We pay strangers for things our own hands could do. We guess, and we forget. And a small, doable act of care becomes one more thing we meant to get to.
+The model identifies what appears in the scene; **application logic decides whether the next step is allowed**. The controller requires two independent observations, rejects old or reused frames, and waits when the evidence is uncertain. If the pour is not visible, a confirmed record is labeled differently from a visually observed completion. See the [state machine](backend/carmori/state_machine.py) and [replay tests](#tests).
 
-## Our solution
+## Meta AI used
 
-**Carmori stands in that moment with you.**
-
-It is an AI companion for the car you actually own — not cars in general, yours. It knows your model and your manual. It watches through your camera while your hands stay on the work. It checks every step before it lets you move on. And when you're done, it remembers — so you never have to.
-
-Each feature answers one of the four problems.
-
-**The knowledge — written for your car, not for everyone.**
-
-- **Meet your car.** Scan the VIN plate, photograph the car, or upload the bill of sale. Carmori reads it once and knows which car is yours — then lets the VIN and the document go. Every answer after that starts from your exact car.
-- **Hear your car.** One tap, and Carmori tells you how your car is doing: what was done, what's due, what last week's rain asked of it — and what it honestly doesn't know yet.
-- **Ask your car.** Talk to Muse by voice or text. It answers from your car's manual and records. When the record is silent, so is it.
-- **Buy the right bottle.** The shelf doesn't know your winter. Carmori checks the coming cold and tells you which freeze rating will hold.
-
-**The help — guidance that never asks for your hands.**
-
-- **A guide that watches.** Mount the phone and work. Carmori sees each step through the camera and speaks the next one. You never touch the screen.
-- **A voice instead of a tap.** Ask in the middle of the job. You speak; the work continues.
-- **Tires, wheel by wheel.** Walk around the car and hold the phone still. Carmori captures the sidewall and the tread of each tire on its own — eight views, no buttons.
-- **Help beyond the hood.** Gas, repairs, car washes and parts stores are one tap away. When you forget where you parked, Find my car points you back. And when CarPlay or Android Auto connects, Carmori can greet you with your car's briefing.
-
-**The check — finally, someone whose job it is.**
-
-- **Two eyes before every step.** The AI never decides alone. Two separate camera observations must agree before any step advances. When the view is unclear, it waits — the way a careful friend would.
-- **The wrong bottle stops everything.** Show coolant, oil or a coffee cup, and pouring stays locked — because some mistakes you only get to make once.
-- **No blurry evidence.** The tire check turns away the blurry, the dark and the crooked. Hold up a tread gauge, and Carmori reads the number — but you confirm it before it counts.
-
-**The record — memory that doesn't fade.**
-
-- **Every job remembers how it was done.** Each record is stamped with its source: seen on camera, or confirmed by you.
-- **Know what's due.** Status keeps every part in one place — washer fluid, tires, oil, brakes, filters, belts — with what was done, when, and what to look at next.
-- **Keep it all in the glove box.** Insurance and registration with renewal reminders, and a care history of every confirmed job, with photos, as a list or a calendar.
-
-**One job, all four answers.** The first complete job — a washer-fluid refill on a 2014 Hyundai Sonata — brings them together:
-
-1. **Find.** There it is — the cap, marked in your camera view. It was always there. You just needed someone who knew your car to point.
-2. **Open.** Both hands on the cap. You never touch the phone. The guide sees it happen and moves on by itself.
-3. **Check.** Show the bottle. If it isn't washer fluid, everything stops.
-4. **Pour. Close.** Carmori watches the pour, and waits until it sees the cap closed. It claims only what it actually saw.
-5. **Remember.** The refill is saved with how it was confirmed. Days later you can ask, "What did I just do?" — and it answers from the record, not from a guess.
-
-Carmori doesn't do the work for you. It makes sure you're never alone while you do it.
-
-## Meta technology we used
-
-We didn't use four Meta models because we could. We used them because that moment in front of the open hood demands four different kinds of attention.
-
-**Muse Spark 1.3** is the attention of someone standing beside you. It watches the live camera two frames at a time — finds the cap, reads the label, checks a tire, reads a VIN plate. And when you ask it a question, it answers only from your car's own records. If it doesn't know, it doesn't invent. That restraint is the feature.
-
-**Muse Voice Transcribe 1.0** is listening, so your hands don't have to stop. You speak; the work continues.
-
-**SAM 3.1** studies what already happened — segmenting and tracking the cap, the bottle, the inlet in uploaded clips. It doesn't drive the live guide, and we won't claim it does.
-
-**SAM 3D** gives the car back to you. The Sonata on Home is a SAM 3D model, generated from a photograph — your car, present on the screen the way it's present in your life.
-
-Every confirmed step in the guide is a real Spark response. Every simulated one is labeled **Demo Mode**. We labeled them because trust is the whole product: a companion that exaggerates what it saw would be worse than no companion at all.
-
-Technology is usually measured by what it can do. We would rather be measured by what it noticed: a cap, a label, a pair of busy hands — and a small job, done right, by the person who owns the car.
-
-*Model-by-model scope: [How the Meta AI components fit together](#how-the-meta-ai-components-fit-together).*
-
----
-
-**Live prototype:** [Open Carmori](https://driveai-ni3a.onrender.com/) on a phone or desktop. The hosted HTTPS app needs no local setup; allow camera and microphone access to try the guides. The [local setup](#run-it-locally) below is for development and reproduction.
-
-**[Demo video](#demo-3-minutes) ([YouTube](https://youtu.be/ciQin_Bnydw)) · [Meta model roles](#how-the-meta-ai-components-fit-together) · [Scope decision and architecture](#deliberately-deferred-streaming-sam-and-spatial-ar) · [Tests](#tests)**
-
-
-## What judges can verify
-
-| Rubric | Evidence in this prototype | Where to look |
+| Technology | What it does here | Scope |
 | --- | --- | --- |
-| **Impact (30%)** | A complete owner journey, from a vehicle-specific question to a hands-free refill and a saved record. | [Demo video](#demo-3-minutes), [supported car and sources](#supported-car-and-data-sources) |
-| **Use of Meta AI Tooling (25%)** | Muse Spark interprets live camera observations and product labels; Muse Voice Transcribe handles spoken input. Home shows a team-supplied SAM 3D result for the demo Sonata. SAM 3.1 can segment an uploaded clip but does not drive the live overlay. | [Model roles](#how-the-meta-ai-components-fit-together), [3D scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
-| **Technical Depth & Execution (20%)** | A deterministic state machine requires two disjoint observations, rejects stale responses and incompatible products, and records whether completion was observed or user-confirmed. | [Decision rules](#how-the-hands-free-refill-decides), [replay tests](#tests) |
-| **Demo (25%)** | The camera view shows the cap cue, the hands it recognizes, a no-tap step change in real time, and the tire check capturing views on its own. | [Demo video](#demo-3-minutes) |
+| **Muse Spark 1.3** | Interprets camera frames, product labels, vehicle details, and grounded questions. | Its observations are validated by the server; model text alone never advances a maintenance step. |
+| **Muse Voice Transcribe 1.0** | Converts spoken input for hands-free use. | Voice commands do not certify an inlet or an unsafe product. |
+| **SAM 3.1** | Segments and tracks a selected cap, bottle, or inlet in an uploaded short video. | Separate clip-processing endpoint; **not** the live camera overlay. |
+| **SAM 3D** | A team-supplied, SAM 3D-derived GLB is displayed for the demo Sonata. | Automatic per-vehicle generation is **not** implemented end to end. |
 
-The live video should show the **camera scene and the app screen together** at the no-tap transition. A simulated run must be labeled **Demo Mode**; it is not evidence of a successful Meta-backed camera run.
+The live 2D guidance cue uses local browser image matching between Muse checks, not streaming SAM or spatial AR. See the [component-by-component architecture](#how-the-meta-ai-components-fit-together).
 
-**Stage One proof:** Run with a valid server-side `META_API_KEY` and `CARMORI_SPARK=meta`. The automatic transition response includes `model_version` and `simulated: false`; the guide's evidence card shows the model and the observed condition. Never include the API key in a recording or submission. [`spark.py`](backend/carmori/spark.py) makes the Meta calls; [`main.py`](backend/carmori/main.py) creates the transition event.
+## Evidence for judges
 
-## Long-term vision
+| Area | What can be inspected | Evidence |
+| --- | --- | --- |
+| **Usefulness** | A vehicle-specific question, guided refill, and newly saved service record. | [Three-minute demo](#demo-3-minutes), [supported car](#supported-car-and-data-sources) |
+| **Meta model integration** | Muse Spark camera analysis, Muse Voice transcription, SAM 3.1 clip endpoint, and the supplied SAM 3D vehicle asset. | [Architecture](#how-the-meta-ai-components-fit-together), [integration scope](#deliberately-deferred-streaming-sam-and-spatial-ar) |
+| **Technical execution** | Independent-observation gate, product checks, out-of-order response handling, and provenance-aware records. | [State machine](backend/carmori/state_machine.py), [tests](#tests) |
+| **Demo** | The camera guidance and step transitions in the washer-fluid workflow. | [Demo video](#demo-3-minutes), [demo setup](#demo-setup) |
 
-Car ownership is more than driving. Maintenance history lives in receipts, warnings in the dashboard, instructions in a manual, and the next task on a to-do list. Carmori brings those fragmented moments together so owners can **understand their car, get help while doing the work, and keep a trustworthy record of what happened**.
-
-Our long-term vision is an AI companion for **the car you actually own**, not a generic chatbot or another maintenance reminder app. Carmori should recognize the vehicle and its context, remember its history and the owner's preferences, make everyday driving and care easier, and eventually guide people directly over real vehicle components through spatial augmented reality.
-
-### The ownership experience we want to build
-
-| Pillar | Long-term experience |
-| --- | --- |
-| **Vehicle Memory** | One evolving history of mileage, service receipts, photos, repairs, oil changes, washes, vehicle documents, and owner preferences. |
-| **Proactive Companion** | Briefings and conversational answers grounded in vehicle history, maintenance schedules, weather, and relevant driving context. |
-| **Visual & AR Garage** | Camera-guided care today; component-aware, spatially anchored instructions on the real car as recognition and tracking mature. |
-| **Everyday Discover** | Useful services, parking memories, nearby stops, and suggestions that relate to the owner's vehicle and routine. |
-
-The intended loop is **Know the car → Understand the need → Guide the action → Remember the result**. The experience should become more useful as the vehicle's memory grows.
-
-### Why a washer-fluid refill for a three-minute demo?
-
-A fully generalized automotive assistant would require vehicle-specific data across many models, robust real-world perception, calibrated 3D geometry, spatial tracking, and extensive safety validation. Those systems cannot all be built and validated in a short hackathon.
-
-We chose **one complete, hands-free care journey** on a **2014 Hyundai Sonata** instead: a useful briefing, a grounded question, a camera-guided refill, and an answer that uses the newly saved record. This scenario makes the connection between **vision, voice, workflow decisions, and long-term memory** visible within three minutes.
-
-**Brief → Ask → Inspect → Refill → Remember**
-
-Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. Home displays a **team-supplied SAM 3D result for the 2014 Sonata**. We deliberately deferred streaming SAM, automatic SAM 3D generation for arbitrary vehicles, and native spatial AR so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
+**Verification boundary:** Automated tests and scripted replays exercise the rules, but they are **not** a measured real-car success rate. The [latest documented test snapshot](#tests) states what passed and what still needs field validation. For a Meta-backed run, the backend must have a valid `META_API_KEY`; `CARMORI_SPARK=meta` enables model-backed observations and `simulated: false` marks the non-demo transition. Without access, the app labels simulated checks rather than presenting them as real detections.
 
 ---
 
@@ -172,7 +98,7 @@ Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses
 | **On-device visual tracking** | Follow a Muse-verified point as the phone moves and update the cue and the next camera crop together. | Local browser image matching, not SAM or 3D AR. The cue disappears if matching fails; Muse must relocate the target. |
 | **Carmori backend and vehicle memory** | Determine workflow transitions, reject unsafe or unsupported conclusions, store evidence-backed maintenance records. | FastAPI state machine, vehicle-specific owner-manual guidance, records, and replay tests. |
 
-**Why separate model perception from workflow decisions?** A visual model can describe what it sees, but maintenance actions need predictable guardrails. Carmori requires agreeing observations, waits when the view is blocked, rejects the wrong product, and records whether an action was visually observed or confirmed by the user. The model provides observations; application logic controls progression.
+**Architecture principle:** Muse provides scene observations; the backend validates them before updating the workflow. The app records whether completion was visually observed or explicitly confirmed.
 
 **The Meta-backed path:** phone camera → Muse Spark scene fields → server validation and state transition → on-screen/voice instruction → evidence-backed care-history record. A successful automatic transition returns the previous and next steps, condition, observation and frame IDs, model version, decision time, and measured model processing time. The UI shows a confirmation only after that server event. [Backend transition code](backend/carmori/main.py) and [guide UI](web/src/screens/Work.tsx) implement this boundary. In `fake` mode, the event and UI say **Simulated observation**.
 
@@ -192,27 +118,6 @@ FIND_INLET → OPEN_CAP → CONFIRM_PRODUCT → POUR → FINISH → RECORDED
 - **A late answer can't skip ahead.** Old answers are dropped by sequence number and state version.
 - **Records say where they came from.** A refill seen on camera is saved as `observed_sequence`. If the pour was hidden, Carmori asks, and saves `user_voice_confirmed` only after you say yes.
 - Carmori never estimates the fluid level or how much you poured.
-
----
-
-## Demo (3 minutes)
-
-https://github.com/user-attachments/assets/5f66cca0-79f9-45a5-81d3-e51140686d03
-
-**Watch in full quality on YouTube:** https://youtu.be/ciQin_Bnydw
-
-This is a **vertical slice of the longer-term Carmori experience**, not a claim that every vehicle or maintenance task is supported today. The story starts with what the car knows, moves into a physical task, and ends with a new memory the assistant can recall.
-
-**What to watch for:** the assistant grounds its advice in records; Muse observations inform a hands-free task; the controller validates progression; and the final answer reflects the saved maintenance event. Keep the user's hands and the app screen visible together when the cap opens. Show the model-backed run, not a replay or Demo Mode, as proof of automatic recognition.
-
-### Before you start
-
-- Engine off and cool, hood open, car parked.
-- Phone on a stable mount with the engine bay in view, in good, even light. The initial cap search is automatic; if recognition is uncertain, move the phone as directed rather than claiming a successful detection.
-- A real washer-fluid bottle with a readable label. If you show coolant or oil, only show the label. Never pour it into the washer tank.
-- Backend running with `META_API_KEY`. The top bar shows **Demo Mode** when step checks are simulated. Don't present Demo Mode as real camera recognition.
-- The car is registered as **2014 Hyundai Sonata**, so the Sonata guide is used.
-- Camera, microphone and location are on in **Menu → Settings**.
 
 ---
 
@@ -243,6 +148,68 @@ The proposed deployment separates the web/API service from the GPU worker; the e
 3. **3D assets and spatial AR:** Make the team-supplied Sonata asset reproducible through a GPU job and reviewed GLB export for new cars; separately test ARKit/ARCore anchors against the real car. A generated vehicle asset is not a physical component anchor.
 4. **More vehicles and tasks:** Add vehicle-specific manuals, workflows, and validated safety checks beyond the initial Sonata refill.
 5. **Deeper ownership memory:** Link maintenance, documents, trip context, personalized care, and the proactive companion into one continuous experience.
+
+---
+
+## Tests
+
+```bash
+cd backend
+.venv/bin/pytest -q
+.venv/bin/carmori-replay ../fixtures/clips
+```
+
+`carmori-replay` runs the state machine over 16 scripted clips: a normal refill, flicker, a blocked view, a wrong bottle, a bottle swap, an empty-bottle pour, late and out-of-order answers, and voice trying to approve a product. It fails on any wrong record. CI runs both, plus `pnpm build`.
+
+### D7 verification snapshot · 2026-11-03
+
+| Check | Result | What it proves |
+| --- | --- | --- |
+| Backend tests | **177 passed, 1 skipped** | The current automated backend suite passes. |
+| Scripted workflow replay | **16/16 clips passed; 0 wrong automatic records** | The state machine handles the scripted normal and failure cases. This is not a real-car success rate. |
+| Real-car, uninterrupted phone runs | **Not scored yet** | Attempt count, no-tap completion rate, false transitions and first correct cap-cue time still need a measured run. |
+
+
+**Real-clip test set:** [docs/REAL_CLIP_TEST_SET.md](docs/REAL_CLIP_TEST_SET.md) lists 12 cases (14 planned clips), including normal completion, occlusion, a coffee cup, a wrong fluid, a hidden label and an unseen pour. `python -m carmori.annotate --case <id>` asks the model once per frame window and saves the answers. `carmori-replay --report` then writes a results table, and rule changes can be re-checked with no API cost. The scripted fixtures above are **not** a measured real-car success rate. These metrics remain unreported until they are measured in uninterrupted real-car runs.
+
+---
+
+## Long-term vision
+
+Today's prototype is a phone-based, vehicle-specific maintenance guide with records. Over time, we want to extend the same approach to more vehicles, additional maintenance tasks, proactive owner assistance, and wearable interfaces. Component-aware instructions through AI glasses or spatial AR are **future directions**, not current functionality.
+### The ownership experience we want to build
+
+| Pillar | Long-term experience |
+| --- | --- |
+| **Vehicle Memory** | One evolving history of mileage, service receipts, photos, repairs, oil changes, washes, vehicle documents, and owner preferences. |
+| **Proactive Companion** | Briefings and conversational answers grounded in vehicle history, maintenance schedules, weather, and relevant driving context. |
+| **Visual & AR Garage** | Camera-guided care today; component-aware, spatially anchored instructions on the real car as recognition and tracking mature. |
+| **Everyday Discover** | Useful services, parking memories, nearby stops, and suggestions that relate to the owner's vehicle and routine. |
+
+The intended loop is **Know the car → Understand the need → Guide the action → Remember the result**. The experience should become more useful as the vehicle's memory grows.
+
+### Why a washer-fluid refill for a three-minute demo?
+
+A fully generalized automotive assistant would require vehicle-specific data across many models, robust real-world perception, calibrated 3D geometry, spatial tracking, and extensive safety validation. Those systems cannot all be built and validated in a short hackathon.
+
+We chose **one complete, hands-free care journey** on a **2014 Hyundai Sonata** instead: a useful briefing, a grounded question, a camera-guided refill, and an answer that uses the newly saved record. This scenario makes the connection between **vision, voice, workflow decisions, and long-term memory** visible within three minutes.
+
+**Brief → Ask → Inspect → Refill → Remember**
+
+Built for the Meta Global AI Developer Hackathon 2026. The live refill path uses **Muse Spark 1.3** for camera observations and **Muse Voice Transcribe 1.0** for speech. A separate **SAM 3.1** endpoint analyzes uploaded short clips; the live arrow uses on-device image matching. Home displays a **team-supplied SAM 3D result for the 2014 Sonata**. We deliberately deferred streaming SAM, automatic SAM 3D generation for arbitrary vehicles, and native spatial AR so we could validate the complete hands-free task first. [The scope decision and integration paths are below.](#deliberately-deferred-streaming-sam-and-spatial-ar)
+
+---
+
+## Demo setup
+
+### Before you start
+
+- Engine off and cool, hood open, car parked.
+- Phone on a stable mount with the engine bay in view, in good, even light. The initial cap search is automatic; if recognition is uncertain, move the phone as directed rather than claiming a successful detection.
+- A real washer-fluid bottle with a readable label. If you show coolant or oil, only show the label. Never pour it into the washer tank.
+- Backend running with `META_API_KEY`. The top bar shows **Demo Mode** when step checks are simulated. Don't present Demo Mode as real camera recognition.
+- The car is registered as **2014 Hyundai Sonata**, so the Sonata guide is used.
+- Camera, microphone and location are on in **Menu → Settings**.
 
 ---
 
@@ -343,30 +310,6 @@ The guided refill is tuned for the **2014 Hyundai Sonata (YF, GLS 2.4 GDI)**. Re
 - **Vehicle data:** NHTSA vPIC for VIN decoding and the make/model list.
 - **Places:** the optional place-visit prompt looks up nearby gas stations, repair shops and car washes in OpenStreetMap (Overpass). The Places shortcuts open Google Maps searches.
 - **Car photo:** a 2013 Sonata GLS photo under CC BY-SA 4.0 ([credits](web/public/CREDITS.md)).
-
----
-
-## Tests
-
-```bash
-cd backend
-.venv/bin/pytest -q
-.venv/bin/carmori-replay ../fixtures/clips
-```
-
-`carmori-replay` runs the state machine over 16 scripted clips: a normal refill, flicker, a blocked view, a wrong bottle, a bottle swap, an empty-bottle pour, late and out-of-order answers, and voice trying to approve a product. It fails on any wrong record. CI runs both, plus `pnpm build`.
-
-### D7 verification snapshot · 2026-11-03
-
-| Check | Result | What it proves |
-| --- | --- | --- |
-| Backend tests | **177 passed, 1 skipped** | The current automated backend suite passes. |
-| Scripted workflow replay | **16/16 clips passed; 0 wrong automatic records** | The state machine handles the scripted normal and failure cases. This is not a real-car success rate. |
-| Real-car, uninterrupted phone runs | **Not scored yet** | Attempt count, no-tap completion rate, false transitions and first correct cap-cue time still need a measured run. |
-
-**Submission wording template — example numbers only, not D7 findings:** “In **5** real-car attempts, **4/5** reached a saved record without a screen tap, with **0** false transitions; the median time to the first correct cap cue was **8.0 s**.” Replace all four example values with measured results from uninterrupted phone runs tonight before using this sentence in a submission. Keep failed attempts in the denominator and time the cue from opening the guide, not from the first model response.
-
-**Real-clip test set:** [docs/REAL_CLIP_TEST_SET.md](docs/REAL_CLIP_TEST_SET.md) lists 12 cases (14 planned clips), including normal completion, occlusion, a coffee cup, a wrong fluid, a hidden label and an unseen pour. `python -m carmori.annotate --case <id>` asks the model once per frame window and saves the answers. `carmori-replay --report` then writes a results table, and rule changes can be re-checked with no API cost. The scripted fixtures above are **not** a measured real-car success rate. Before submission, report actual attempts, no-tap completions, false transitions and time to the first correct cap cue; do not infer these numbers from unit tests.
 
 ---
 
