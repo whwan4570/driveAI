@@ -1,20 +1,18 @@
 # Render Blueprint: one web service serves the built web app at / and the API at /api.
-# The disk keeps SQLite, owner manuals and 3D models across deploys and restarts.
-# Starter + disk are paid; switch the plan back (and remove the disk) after the demo.
+# Free plan: no disk, so SQLite, owner manuals and 3D models live in backend/data and
+# are reset on every deploy or restart, and the service sleeps after 15 idle minutes.
+# To keep data, switch to a paid plan, add a disk at /var/data and set
+# CARMORI_DB_PATH=/var/data/carmori.sqlite.
 services:
   - type: web
     name: carmori
     runtime: python
-    plan: starter
+    plan: free
     region: oregon
     branch: main
     buildCommand: pip install -e ./backend && cd web && npx --yes pnpm@11.5.3 install --frozen-lockfile && npx --yes pnpm@11.5.3 build
     startCommand: cd backend && uvicorn carmori.site:create_site --factory --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
-    disk:
-      name: carmori-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: META_API_KEY
         sync: false
@@ -22,8 +20,6 @@ services:
         value: 3.10.5
       - key: NODE_VERSION
         value: "22"
-      - key: CARMORI_DB_PATH
-        value: /var/data/carmori.sqlite
       - key: SPARK_VISION_MODEL
         value: muse-spark-1.3
       - key: SPARK_REASONING_EFFORT

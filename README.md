@@ -309,7 +309,7 @@ Open `https://<Mac IP>:5174` in Safari. Keep `ca.key` and `server.key` private.
 2. Enter `META_API_KEY` when asked.
 3. Deploy, then open your Render service URL. The current public deployment is [driveai-ni3a.onrender.com](https://driveai-ni3a.onrender.com/).
 
-The Blueprint uses the paid **Starter** plan and a 1 GB disk at `/var/data`. Render bills both by the time used. The disk keeps SQLite, downloaded manuals and 3D models through deploys and restarts, and Starter does not sleep. On the free plan the server sleeps after 15 minutes idle and loses saved data on restart. Switch the plan back and remove the disk when the demo is over.
+The Blueprint uses Render's **free** plan. It has no disk, so the SQLite database, downloaded manuals and 3D models are stored in `backend/data` and reset on every deploy or restart. The service also sleeps after 15 minutes without traffic, and the first visit after that takes about a minute to wake it. To keep data, switch to a paid plan, add a disk at `/var/data` and set `CARMORI_DB_PATH=/var/data/carmori.sqlite`. Don't set `CARMORI_DB_PATH` to `/var/data` without the disk: the folder is not writable and the server exits at startup.
 
 To run the deployed setup locally after `pnpm build` in `web/`:
 
